@@ -1,5 +1,6 @@
 from django.views.generic import TemplateView
 from django.db.models import Avg, Count, Max, Min
+from django.db import transaction  # ← добавлено
 
 from rest_framework import serializers
 from rest_framework.decorators import action
@@ -110,6 +111,13 @@ class OrderViewSet(ModelViewSet):
         )
         serializer = self.StatsSerializer(instance=stats)
         return Response(serializer.data)
+
+    # === ВАЖНО: корректное удаление заказа с его позициями ===
+    def destroy(self, request, *args, **kwargs):
+        obj = self.get_object()
+        with transaction.atomic():
+            OrderItem.objects.filter(order=obj).delete()
+            return super().destroy(request, *args, **kwargs)
 
 
 class OrderItemViewSet(ModelViewSet):
