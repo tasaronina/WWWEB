@@ -6,6 +6,7 @@ import "@/styles/admin.css"
 const orders = ref([])
 const menu = ref([])
 const orderItems = ref([])
+const stats = ref(null)
 const loading = ref(false)
 const error = ref("")
 
@@ -13,8 +14,15 @@ const newOrderId = ref(null)
 const newMenuId = ref(null)
 const newQty = ref(1)
 
+function formatNumber(value) {
+  if (value === null || value === undefined) return "-"
+  const num = Number(value)
+  if (Number.isNaN(num)) return String(value)
+  return num.toFixed(2)
+}
+
 function menuTitle(m) {
-  return m.name ?? m.title ?? `Позиция #${m.id}`
+  return m?.name ?? m?.title ?? (m?.id ? `Позиция #${m.id}` : "-")
 }
 
 async function fetchOrders() {
@@ -29,12 +37,16 @@ async function fetchMenu() {
 
 async function fetchOrderItems() {
   const { data } = await axios.get("/api/order-items/")
-  // здесь подставляем текущие ID в _editOrderId и _editMenuId
   orderItems.value = data.map((it) => ({
     ...it,
     _editOrderId: it.order?.id ?? it.order ?? null,
     _editMenuId: it.menu?.id ?? it.menu ?? null,
   }))
+}
+
+async function fetchStats() {
+  const { data } = await axios.get("/api/order-items/stats/")
+  stats.value = data
 }
 
 async function createItem() {
@@ -47,29 +59,34 @@ async function createItem() {
   newOrderId.value = null
   newMenuId.value = null
   newQty.value = 1
-  await fetchOrderItems()
+  await Promise.all([fetchOrderItems(), fetchStats()])
 }
 
 async function updateItem(it) {
-  await axios.patch(`/api/order-items/${it.id}/`, {
+  await axios.put(`/api/order-items/${it.id}/`, {
     qty: Number(it.qty),
     order_id: Number(it._editOrderId),
     menu_id: Number(it._editMenuId),
   })
-  await fetchOrderItems()
+  await Promise.all([fetchOrderItems(), fetchStats()])
 }
 
 async function removeItem(id) {
   if (!confirm("Удалить позицию заказа?")) return
   await axios.delete(`/api/order-items/${id}/`)
-  await fetchOrderItems()
+  await Promise.all([fetchOrderItems(), fetchStats()])
 }
 
 onBeforeMount(async () => {
   loading.value = true
   error.value = ""
   try {
-    await Promise.all([fetchOrders(), fetchMenu(), fetchOrderItems()])
+    await Promise.all([
+      fetchOrders(),
+      fetchMenu(),
+      fetchOrderItems(),
+      fetchStats(),
+    ])
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -79,41 +96,66 @@ onBeforeMount(async () => {
 </script>
 
 <template>
-  <div class="page">
-    <div v-if="error" class="alert alert-danger alert-inline">Ошибка: {{ error }}</div>
+  <div class="container my-4 page">
+    <h1 class="mb-3">Добавить позицию заказа</h1>
 
-    <div class="section">
-      <h3>Добавить позицию заказа</h3>
-      <div class="inline-form">
-        <select class="form-select" v-model="newOrderId">
-          <option :value="null" disabled>Заказ...</option>
-          <option v-for="o in orders" :key="o.id" :value="o.id">
-            Заказ #{{ o.id }}
-          </option>
-        </select>
+    <div v-if="error" class="alert alert-danger alert-inline">
+      Ошибка: {{ error }}
+    </div>
 
-        <select class="form-select" v-model="newMenuId">
-          <option :value="null" disabled>Позиция меню...</option>
-          <option v-for="m in menu" :key="m.id" :value="m.id">
-            {{ menuTitle(m) }}
-          </option>
-        </select>
-
-        <input
-          type="number"
-          class="form-control"
-          v-model.number="newQty"
-          min="1"
-          style="width: 110px"
-          placeholder="Кол-во"
-        />
-
-        <button class="btn btn-primary" @click="createItem">Создать</button>
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label">Заказ</label>
+            <select v-model="newOrderId" class="form-select">
+              <option :value="null" disabled>Заказ...</option>
+              <option v-for="o in orders" :key="o.id" :value="o.id">
+                Заказ #{{ o.id }}
+              </option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Позиция меню</label>
+            <select v-model="newMenuId" class="form-select">
+              <option :value="null" disabled>Позиция меню...</option>
+              <option v-for="m in menu" :key="m.id" :value="m.id">
+                {{ menuTitle(m) }}
+              </option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Кол-во</label>
+            <input
+              v-model.number="newQty"
+              type="number"
+              min="1"
+              class="form-control"
+            />
+          </div>
+          <div class="col-md-2 d-grid">
+            <button class="btn btn-primary" type="button" @click="createItem">
+              Создать
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="section">
-      <div class="table-wrap">
+    <div v-if="stats" class="alert alert-secondary small mb-3">
+      <div class="d-flex flex-wrap gap-3">
+        <span>Всего позиций: <strong>{{ stats.count }}</strong></span>
+        <span
+          >Среднее кол-во в строке:
+          <strong>{{ formatNumber(stats.avg) }}</strong></span
+        >
+        <span>Макс. кол-во: <strong>{{ stats.max }}</strong></span>
+        <span>Мин. кол-во: <strong>{{ stats.min }}</strong></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body table-responsive">
         <table class="table table-bordered align-middle">
           <thead>
             <tr>
@@ -131,39 +173,47 @@ onBeforeMount(async () => {
               <td>{{ it.id }}</td>
               <td>#{{ it.order?.id ?? it.order }}</td>
               <td>
-                {{ it.menu?.name ?? it.menu?.title ?? ("#" + (it.menu?.id ?? it.menu)) }}
+                {{ menuTitle(it.menu) }}
               </td>
               <td>
                 <input
-                  type="number"
-                  class="form-control form-control-sm"
                   v-model.number="it.qty"
+                  type="number"
                   min="1"
+                  class="form-control form-control-sm"
                 />
               </td>
               <td>
                 <input
-                  type="number"
-                  class="form-control form-control-sm"
                   v-model.number="it._editOrderId"
+                  type="number"
                   min="1"
+                  class="form-control form-control-sm"
                   placeholder="ID заказа"
                 />
               </td>
               <td>
                 <input
-                  type="number"
-                  class="form-control form-control-sm"
                   v-model.number="it._editMenuId"
+                  type="number"
                   min="1"
+                  class="form-control form-control-sm"
                   placeholder="ID меню"
                 />
               </td>
               <td>
-                <button class="btn btn-sm btn-success me-2" @click="updateItem(it)">
+                <button
+                  class="btn btn-sm btn-success me-2"
+                  type="button"
+                  @click="updateItem(it)"
+                >
                   Сохранить
                 </button>
-                <button class="btn btn-sm btn-danger" @click="removeItem(it.id)">
+                <button
+                  class="btn btn-sm btn-danger"
+                  type="button"
+                  @click="removeItem(it.id)"
+                >
                   Удалить
                 </button>
               </td>

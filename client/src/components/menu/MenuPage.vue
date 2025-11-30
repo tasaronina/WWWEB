@@ -5,6 +5,7 @@ import "@/styles/admin.css"
 
 const items = ref([])
 const categories = ref([])
+const stats = ref(null)
 const loading = ref(false)
 const error = ref("")
 
@@ -26,6 +27,13 @@ const itemToEdit = ref({
 
 const editPictureFile = ref(null)
 
+function formatNumber(value) {
+  if (value === null || value === undefined) return "-"
+  const num = Number(value)
+  if (Number.isNaN(num)) return String(value)
+  return num.toFixed(2)
+}
+
 async function fetchCategories() {
   const { data } = await axios.get("/api/categories/")
   categories.value = data
@@ -34,6 +42,11 @@ async function fetchCategories() {
 async function fetchItems() {
   const { data } = await axios.get("/api/menu/")
   items.value = data
+}
+
+async function fetchStats() {
+  const { data } = await axios.get("/api/menu/stats/")
+  stats.value = data
 }
 
 function onAddPictureChange(event) {
@@ -73,7 +86,7 @@ async function onItemAdd() {
     picturePreview: null,
   }
 
-  await fetchItems()
+  await Promise.all([fetchItems(), fetchStats()])
 }
 
 function onItemEditClick(it) {
@@ -85,7 +98,6 @@ function onItemEditClick(it) {
     pictureUrl: it.picture ?? null,
   }
   editPictureFile.value = null
-  // bootstrap берётся из index.html, как и в методичке
   new bootstrap.Modal(document.getElementById("editMenuModal")).show()
 }
 
@@ -106,20 +118,20 @@ async function onItemUpdate() {
     headers: { "Content-Type": "multipart/form-data" },
   })
 
-  await fetchItems()
+  await Promise.all([fetchItems(), fetchStats()])
 }
 
 async function onRemoveClick(it) {
   if (!confirm(`Удалить позицию "${it.name}"?`)) return
   await axios.delete(`/api/menu/${it.id}/`)
-  await fetchItems()
+  await Promise.all([fetchItems(), fetchStats()])
 }
 
 onBeforeMount(async () => {
   loading.value = true
   error.value = ""
   try {
-    await Promise.all([fetchCategories(), fetchItems()])
+    await Promise.all([fetchCategories(), fetchItems(), fetchStats()])
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -153,16 +165,9 @@ onBeforeMount(async () => {
 
           <div class="col-md-3">
             <label class="form-label">Категория</label>
-            <select
-              v-model="newItem.group_id"
-              class="form-select"
-            >
+            <select v-model="newItem.group_id" class="form-select">
               <option value="">Категория...</option>
-              <option
-                v-for="c in categories"
-                :key="c.id"
-                :value="c.id"
-              >
+              <option v-for="c in categories" :key="c.id" :value="c.id">
                 {{ c.name }}
               </option>
             </select>
@@ -200,14 +205,19 @@ onBeforeMount(async () => {
         </div>
 
         <div class="mt-3">
-          <button
-            class="btn btn-primary"
-            type="button"
-            @click="onItemAdd"
-          >
+          <button class="btn btn-primary" type="button" @click="onItemAdd">
             Добавить
           </button>
         </div>
+      </div>
+    </div>
+
+    <div v-if="stats" class="alert alert-secondary small mb-3">
+      <div class="d-flex flex-wrap gap-3">
+        <span>Всего позиций: <strong>{{ stats.count }}</strong></span>
+        <span>Средняя цена: <strong>{{ formatNumber(stats.avg) }}</strong></span>
+        <span>Максимальная цена: <strong>{{ formatNumber(stats.max) }}</strong></span>
+        <span>Минимальная цена: <strong>{{ formatNumber(stats.min) }}</strong></span>
       </div>
     </div>
 
@@ -246,7 +256,7 @@ onBeforeMount(async () => {
                     • Категория: {{ it.group.name }}
                   </span>
                   <span v-if="it.price !== undefined">
-                    • Цена: {{ Number(it.price).toFixed(2) }}
+                    • Цена: {{ formatNumber(it.price) }}
                   </span>
                 </div>
               </div>

@@ -5,38 +5,38 @@ import "@/styles/admin.css"
 
 const orders = ref([])
 const customers = ref([])
-const menu = ref([])
+const menuItems = ref([])
+const stats = ref(null)
 const loading = ref(false)
 const error = ref("")
 
-const orderToAdd = ref({ customer_id: null, status: "NEW" })
-const orderToEdit = ref({ id: null, customer_id: null, status: "" })
+const orderToAdd = ref({ customer_id: "", status: "NEW" })
+const orderToEdit = ref({ id: null, customer_id: "", status: "" })
 
-// позиции для модалки
 const orderItemsForEdit = ref([])
 const newItemForOrder = ref({ menu_id: "", qty: 1 })
 const modalItemsLoading = ref(false)
 
-function menuTitle(m) {
-  if (!m) return "-"
-  return m.name ?? m.title ?? `#${m.id}`
-}
-
-function formatPrice(value) {
+function formatNumber(value) {
   if (value === null || value === undefined) return "-"
   const num = Number(value)
   if (Number.isNaN(num)) return String(value)
   return num.toFixed(2)
 }
 
-// текущая сумма в модалке
-const currentOrderTotal = computed(() => {
-  return orderItemsForEdit.value.reduce((sum, it) => {
+function menuTitle(item) {
+  return item?.name ?? item?.title ?? (item?.id ? `Позиция #${item.id}` : "-")
+}
+
+const currentOrderTotal = computed(() =>
+  orderItemsForEdit.value.reduce((sum, it) => {
     const price = Number(it.menu?.price ?? 0)
     const qty = Number(it.qty ?? 0)
-    return sum + price * qty
-  }, 0)
-})
+    const p = Number.isNaN(price) ? 0 : price
+    const q = Number.isNaN(qty) ? 0 : qty
+    return sum + p * q
+  }, 0),
+)
 
 async function fetchCustomers() {
   const { data } = await axios.get("/api/customers/")
@@ -50,100 +50,125 @@ async function fetchOrders() {
 
 async function fetchMenu() {
   const { data } = await axios.get("/api/menu/")
-  menu.value = data
+  menuItems.value = data
+}
+
+async function fetchStats() {
+  const { data } = await axios.get("/api/orders/stats/")
+  stats.value = data
 }
 
 async function fetchOrderItems(orderId) {
   modalItemsLoading.value = true
   try {
     const { data } = await axios.get(`/api/order-items/?order_id=${orderId}`)
-    orderItemsForEdit.value = data
-  } catch (e) {
-    error.value = String(e)
+    orderItemsForEdit.value = data.map((it) => ({
+      ...it,
+      qty: it.qty ?? 1,
+    }))
   } finally {
     modalItemsLoading.value = false
   }
 }
 
+async function refreshOrders() {
+  await Promise.all([fetchOrders(), fetchStats()])
+}
+
+onBeforeMount(async () => {
+  loading.value = true
+  error.value = ""
+  try {
+    await Promise.all([fetchCustomers(), fetchMenu(), fetchOrders(), fetchStats()])
+  } catch (e) {
+    console.error(e)
+    error.value = String(e)
+  } finally {
+    loading.value = false
+  }
+})
+
 async function onOrderAdd() {
   if (!orderToAdd.value.customer_id) return
 
-  // создаём заказ и сразу получаем его данные
-  const { data: createdOrder } = await axios.post("/api/orders/", {
+  const payload = {
     customer_id: Number(orderToAdd.value.customer_id),
     status: orderToAdd.value.status || "NEW",
-  })
+  }
 
-  // очищаем форму добавления
-  orderToAdd.value = { customer_id: null, status: "NEW" }
+  const { data } = await axios.post("/api/orders/", payload)
 
-  // обновляем список заказов (чтобы он появился в таблице)
-  await fetchOrders()
+  orderToAdd.value = { customer_id: "", status: "NEW" }
 
-  // сразу открываем модалку редактирования для только что созданного заказа
-  onOrderEditClick(createdOrder)
+  await refreshOrders()
+  openEditModal(data)
 }
 
-function onOrderEditClick(o) {
+function openEditModal(order) {
   orderToEdit.value = {
-    id: o.id,
-    customer_id: o.customer?.id ?? o.customer,
-    status: o.status,
+    id: order.id,
+    customer_id: order.customer?.id ?? order.customer_id ?? order.customer ?? "",
+    status: order.status,
   }
   newItemForOrder.value = { menu_id: "", qty: 1 }
-  fetchOrderItems(o.id)
-  // bootstrap модалка подключена глобально через main.js
-  new bootstrap.Modal(document.getElementById("editOrderModal")).show()
+  fetchOrderItems(order.id)
+
+  const el = document.getElementById("editOrderModal")
+  if (el && window.bootstrap) {
+    const modal = window.bootstrap.Modal.getOrCreateInstance(el)
+    modal.show()
+  }
+}
+
+function onOrderEditClick(order) {
+  openEditModal(order)
 }
 
 async function onOrderUpdate() {
-  if (!orderToEdit.value.customer_id) return
+  if (!orderToEdit.value.id || !orderToEdit.value.customer_id) return
 
   await axios.put(`/api/orders/${orderToEdit.value.id}/`, {
     customer_id: Number(orderToEdit.value.customer_id),
     status: orderToEdit.value.status,
   })
 
-  await fetchOrders()
+  await refreshOrders()
 
-  // закрываем модалку после сохранения
-  const modalEl = document.getElementById("editOrderModal")
-  if (modalEl && window.bootstrap) {
-    const instance = window.bootstrap.Modal.getInstance(modalEl)
-    if (instance) {
-      instance.hide()
-    }
+  const el = document.getElementById("editOrderModal")
+  if (el && window.bootstrap) {
+    const modal = window.bootstrap.Modal.getInstance(el)
+    if (modal) modal.hide()
   }
 }
-async function onRemoveClick(o) {
-  if (!confirm(`Удалить заказ #${o.id}?`)) return
-  await axios.delete(`/api/orders/${o.id}/`)
-  await fetchOrders()
+
+async function onRemoveClick(order) {
+  if (!confirm(`Удалить заказ #${order.id}?`)) return
+  await axios.delete(`/api/orders/${order.id}/`)
+  await refreshOrders()
 }
 
-async function onOrderItemSave(it) {
+async function onOrderItemSave(item) {
   if (!orderToEdit.value.id) return
-  const orderId = orderToEdit.value.id
-  const menuId = it.menu?.id ?? it.menu_id
-  const qty = Number(it.qty) || 1
-
-  await axios.put(`/api/order-items/${it.id}/`, {
-    order_id: orderId,
-    menu_id: menuId,
-    qty,
-  })
-
-  await Promise.all([fetchOrderItems(orderId), fetchOrders()])
+  const payload = {
+    order_id: orderToEdit.value.id,
+    menu_id: item.menu?.id ?? item.menu_id,
+    qty: Number(item.qty) || 1,
+  }
+  await axios.put(`/api/order-items/${item.id}/`, payload)
+  await Promise.all([
+    fetchOrderItems(orderToEdit.value.id),
+    refreshOrders(),
+  ])
 }
 
-async function onOrderItemRemove(it) {
+async function onOrderItemRemove(item) {
   if (!orderToEdit.value.id) return
   if (!confirm("Удалить позицию из заказа?")) return
-  const orderId = orderToEdit.value.id
-
-  await axios.delete(`/api/order-items/${it.id}/`)
-
-  await Promise.all([fetchOrderItems(orderId), fetchOrders()])
+  await axios.delete(`/api/order-items/${item.id}/`)
+  await Promise.all([
+    fetchOrderItems(orderToEdit.value.id),
+    refreshOrders(),
+  ])
 }
 
 async function onOrderItemAdd() {
@@ -158,28 +183,20 @@ async function onOrderItemAdd() {
   await axios.post("/api/order-items/", payload)
 
   newItemForOrder.value = { menu_id: "", qty: 1 }
-  await Promise.all([fetchOrderItems(orderToEdit.value.id), fetchOrders()])
-}
 
-onBeforeMount(async () => {
-  loading.value = true
-  error.value = ""
-  try {
-    await Promise.all([fetchCustomers(), fetchOrders(), fetchMenu()])
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    loading.value = false
-  }
-})
+  await Promise.all([
+    fetchOrderItems(orderToEdit.value.id),
+    refreshOrders(),
+  ])
+}
 </script>
 
 <template>
   <div class="container my-4">
     <h1 class="mb-3">Добавить заказ</h1>
 
-    <div v-if="error" class="alert alert-danger" role="alert">
-      {{ error }}
+    <div v-if="error" class="alert alert-danger alert-inline">
+      Ошибка: {{ error }}
     </div>
 
     <div class="card mb-4">
@@ -194,7 +211,6 @@ onBeforeMount(async () => {
               </option>
             </select>
           </div>
-
           <div class="col-md-3">
             <label class="form-label">Статус</label>
             <select v-model="orderToAdd.status" class="form-select">
@@ -204,13 +220,21 @@ onBeforeMount(async () => {
               <option value="CANCELLED">CANCELLED</option>
             </select>
           </div>
-
           <div class="col-md-2 d-grid">
             <button class="btn btn-primary" type="button" @click="onOrderAdd">
               Добавить
             </button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div v-if="stats" class="alert alert-secondary small mb-3">
+      <div class="d-flex flex-wrap gap-3">
+        <span>Всего заказов: <strong>{{ stats.count }}</strong></span>
+        <span>Средний ID: <strong>{{ formatNumber(stats.avg) }}</strong></span>
+        <span>Максимальный ID: <strong>{{ stats.max }}</strong></span>
+        <span>Минимальный ID: <strong>{{ stats.min }}</strong></span>
       </div>
     </div>
 
@@ -224,7 +248,7 @@ onBeforeMount(async () => {
               <th style="width: 140px">Сумма</th>
               <th style="width: 180px">Статус</th>
               <th style="width: 220px">Создан</th>
-              <th style="width: 160px">Действия</th>
+              <th style="width: 170px">Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -233,10 +257,8 @@ onBeforeMount(async () => {
             </tr>
             <tr v-for="o in orders" :key="o.id">
               <td>{{ o.id }}</td>
-              <td>
-                {{ o.customer?.name ?? (o.customer ? `#${o.customer}` : "—") }}
-              </td>
-              <td>{{ formatPrice(o.total_price) }}</td>
+              <td>{{ o.customer?.name ?? `Клиент #${o.customer}` }}</td>
+              <td>{{ formatNumber(o.total_price) }}</td>
               <td>{{ o.status }}</td>
               <td>
                 {{
@@ -279,10 +301,12 @@ onBeforeMount(async () => {
       tabindex="-1"
       aria-hidden="true"
     >
-      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">Редактировать заказ #{{ orderToEdit.id }}</h5>
+            <h5 class="modal-title">
+              Редактировать заказ #{{ orderToEdit.id }}
+            </h5>
             <button
               type="button"
               class="btn-close"
@@ -290,17 +314,19 @@ onBeforeMount(async () => {
               aria-label="Close"
             ></button>
           </div>
+
           <div class="modal-body">
             <div class="row g-3 mb-3">
               <div class="col-md-6">
                 <label class="form-label">Клиент</label>
                 <select v-model="orderToEdit.customer_id" class="form-select">
+                  <option value="">Клиент...</option>
                   <option v-for="c in customers" :key="c.id" :value="c.id">
                     {{ c.name }}
                   </option>
                 </select>
               </div>
-              <div class="col-md-6">
+              <div class="col-md-4">
                 <label class="form-label">Статус</label>
                 <select v-model="orderToEdit.status" class="form-select">
                   <option value="NEW">NEW</option>
@@ -311,24 +337,23 @@ onBeforeMount(async () => {
               </div>
             </div>
 
-            <hr class="my-3" />
+            <h5 class="mt-2 mb-2">Состав заказа</h5>
 
-            <h6 class="mb-2">Состав заказа</h6>
-
-            <div v-if="modalItemsLoading" class="text-muted small mb-2">
-              Загрузка позиций...
-            </div>
-
-            <div class="table-responsive mb-2">
-              <table class="table table-sm align-middle mb-0">
+            <div class="table-responsive mb-3">
+              <table class="table align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Позиция меню</th>
-                    <th style="width: 110px">Кол-во</th>
+                    <th style="width: 120px">Кол-во</th>
                     <th style="width: 160px">Действия</th>
                   </tr>
                 </thead>
                 <tbody>
+                  <tr v-if="modalItemsLoading">
+                    <td colspan="3" class="text-center text-muted">
+                      Загрузка позиций...
+                    </td>
+                  </tr>
                   <tr v-for="it in orderItemsForEdit" :key="it.id">
                     <td>{{ menuTitle(it.menu) }}</td>
                     <td>
@@ -357,7 +382,7 @@ onBeforeMount(async () => {
                     </td>
                   </tr>
                   <tr v-if="!modalItemsLoading && !orderItemsForEdit.length">
-                    <td colspan="3" class="text-center text-muted small">
+                    <td colspan="3" class="text-center text-muted">
                       Позиции ещё не добавлены
                     </td>
                   </tr>
@@ -365,39 +390,47 @@ onBeforeMount(async () => {
               </table>
             </div>
 
-            <div
-              class="d-flex flex-column flex-md-row gap-2 align-items-md-center mb-3"
-            >
-              <select
-                v-model="newItemForOrder.menu_id"
-                class="form-select form-select-sm"
-              >
-                <option value="">Позиция меню...</option>
-                <option v-for="m in menu" :key="m.id" :value="m.id">
-                  {{ menuTitle(m) }}
-                </option>
-              </select>
-              <input
-                v-model.number="newItemForOrder.qty"
-                type="number"
-                min="1"
-                class="form-control form-control-sm"
-                style="max-width: 120px"
-              />
-              <button
-                class="btn btn-sm btn-primary"
-                type="button"
-                @click="onOrderItemAdd"
-              >
-                Добавить позицию
-              </button>
-            </div>
+            <div class="border-top pt-3 mt-3">
+              <div class="row g-2 align-items-end">
+                <div class="col-md-6">
+                  <label class="form-label">Позиция меню</label>
+                  <select
+                    v-model="newItemForOrder.menu_id"
+                    class="form-select"
+                  >
+                    <option value="">Позиция меню...</option>
+                    <option v-for="m in menuItems" :key="m.id" :value="m.id">
+                      {{ menuTitle(m) }}
+                    </option>
+                  </select>
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label">Кол-во</label>
+                  <input
+                    v-model.number="newItemForOrder.qty"
+                    type="number"
+                    min="1"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-3 d-grid">
+                  <button
+                    class="btn btn-primary"
+                    type="button"
+                    @click="onOrderItemAdd"
+                  >
+                    Добавить позицию
+                  </button>
+                </div>
+              </div>
 
-            <div class="text-end text-muted small">
-              Сумма заказа сейчас:
-              <strong>{{ formatPrice(currentOrderTotal) }}</strong>
+              <div class="mt-3 text-end">
+                Сумма заказа сейчас:
+                <strong>{{ formatNumber(currentOrderTotal) }}</strong>
+              </div>
             </div>
           </div>
+
           <div class="modal-footer">
             <button
               type="button"
