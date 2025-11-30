@@ -1,0 +1,166 @@
+/* Базовые настройки */
+:root {
+  --page-pad: 16px;
+  --radius: 12px;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  --muted: #6c757d;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background: #f8f9fb;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+    "Noto Color Emoji", sans-serif;
+  color: #212529;
+}
+
+/* Заголовок страницы */
+h2 {
+  font-weight: 700;
+  letter-spacing: .2px;
+  margin: 0 0 6px;
+}
+
+/* Тот корневой обёрточный div у тебя уже с inline padding;
+   добавим визуальный центр и max-width, не меняя шаблонов */
+#app > div {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Тонкая стилизация навигации (router-link рендерит <a>) */
+nav {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin: 10px 0 18px;
+}
+nav a {
+  text-decoration: none;
+  color: #495057;
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition: background .15s ease;
+}
+nav a.router-link-active {
+  background: #e9ecef;
+  color: #212529;
+  font-weight: 600;
+}
+nav a:hover { background: #f1f3f5 }
+
+/* Карточные секции (обрамляют формы/списки) — применяются к твоим блокам автоматически,
+   потому что ты уже используешь bootstrap-классы: просто усилим вид */
+.section,
+.list-group,
+.table {
+  background: #fff;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* Формы: расстояния и вертикальное выравнивание */
+form, .inline-form {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+/* Кнопки чуть более аккуратные */
+button, .btn {
+  border-radius: 10px !important;
+}
+
+/* Таблица — скруглим контейнер и спрячем края */
+.table {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #e9ecef;
+}
+.table thead th {
+  background: #f8f9fa;
+  font-weight: 600;
+}
+.table td, .table th {
+  vertical-align: middle;
+}
+
+/* Список (клиенты) — чуть более «карточный» вид элемента */
+.list-group-item {
+  border: 0;
+  border-bottom: 1px solid #eef1f4;
+  padding: 16px 18px;
+}
+.list-group-item:last-child { border-bottom: 0 }
+
+/* Превью картинок */
+.preview-img {
+  object-fit: cover;
+  border-radius: 10px;
+  max-height: 60px;
+  max-width: 100%;
+}
+
+/* Круглые аватарки (если используешь) */
+.round { border-radius: 50% }
+
+/* Небольшие подсказки */
+.badge-muted {
+  display: inline-block;
+  padding: .35rem .55rem;
+  font-size: .78rem;
+  color: var(--muted);
+  background: #f1f3f5;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+}
+
+/* Модалки — чуть округлим */
+.modal-content { border-radius: var(--radius) }
+
+/* Блок «Пользователь → Админка» из твоего App.vue:
+   добавим немного воздуха, чтобы он не ломал сетку */
+.collapse.navbar-collapse {
+  margin-left: auto;
+}
+.dropdown-menu {
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+
+/* Добавим внутренние отступы вокруг таблицы внутри карточки */
+.table-wrap {
+  padding: 0 28px 14px;   /* ← боковые отступы + немного снизу */
+  border: 1px solid #e9ecef;
+  border-radius: var(--radius);
+  overflow: auto;
+}
+
+/* Уберём собственную рамку у .table, чтобы не было “двойной” линии */
+.table {
+  border: 0;
+}
+
+/* Увеличим горизонтальные отступы в ячейках */
+.table th,
+.table td {
+  padding-left: 1.25rem !important;
+  padding-right: 1.25rem !important;
+  padding-top: .9rem;
+  padding-bottom: .9rem;
+}
+
+/* Чуть компактнее на очень узких экранах */
+@media (max-width: 576px) {
+  .table-wrap { padding: 0 14px 10px; }
+  .table th, .table td {
+    padding-left: .75rem !important;
+    padding-right: .75rem !important;
+  }
+}
