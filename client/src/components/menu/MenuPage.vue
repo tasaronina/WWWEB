@@ -1,180 +1,370 @@
 <script setup>
 import axios from "axios"
 import { ref, onBeforeMount } from "vue"
-import Cookies from "js-cookie"
 import "@/styles/admin.css"
-
-axios.defaults.headers.common["X-CSRFToken"] = Cookies.get("csrftoken")
 
 const items = ref([])
 const categories = ref([])
 const loading = ref(false)
 const error = ref("")
 
-const newItem = ref({ name: "", group_id: null, pictureFile: null, picturePreview: null })
-const itemToEdit = ref({ id: null, name: "", _editGroupId: null, pictureUrl: null })
+const newItem = ref({
+  name: "",
+  group_id: null,
+  price: 0,
+  pictureFile: null,
+  picturePreview: null,
+})
+
+const itemToEdit = ref({
+  id: null,
+  name: "",
+  price: 0,
+  _editGroupId: null,
+  pictureUrl: null,
+})
+
 const editPictureFile = ref(null)
 
-async function fetchCategories(){ const {data}=await axios.get("/api/categories/"); categories.value=data }
-async function fetchItems(){
+async function fetchCategories() {
+  const { data } = await axios.get("/api/categories/")
+  categories.value = data
+}
+
+async function fetchItems() {
   const { data } = await axios.get("/api/menu/")
-  items.value = data.map(it => ({
-    ...it,
-    pictureUrl: it.picture && !String(it.picture).startsWith("http")
-      ? `${window.location.origin}${it.picture}`
-      : it.picture
-  }))
+  items.value = data
 }
 
-function itemAddPictureChange(e){
-  if(!e.target.files.length) return
-  if(newItem.value.picturePreview) URL.revokeObjectURL(newItem.value.picturePreview)
-  newItem.value.pictureFile = e.target.files[0]
-  newItem.value.picturePreview = URL.createObjectURL(newItem.value.pictureFile)
+function onAddPictureChange(event) {
+  const file = event.target.files?.[0]
+  newItem.value.pictureFile = file || null
+  newItem.value.picturePreview = file ? URL.createObjectURL(file) : null
 }
 
-function onEditPictureChange(e){
-  if(!e.target.files.length) return
-  editPictureFile.value = e.target.files[0]
-  if(itemToEdit.value.pictureUrl) URL.revokeObjectURL(itemToEdit.value.pictureUrl)
-  itemToEdit.value.pictureUrl = URL.createObjectURL(editPictureFile.value)
+function onEditPictureChange(event) {
+  const file = event.target.files?.[0]
+  editPictureFile.value = file || null
+  if (file) {
+    itemToEdit.value.pictureUrl = URL.createObjectURL(file)
+  }
 }
 
-async function onItemAdd(){
-  if(!newItem.value.name.trim() || !newItem.value.group_id) return
-  const fd = new FormData()
-  fd.append("name", newItem.value.name.trim())
-  fd.append("group_id", newItem.value.group_id)
-  if(newItem.value.pictureFile) fd.append("picture", newItem.value.pictureFile)
-  await axios.post("/api/menu/", fd, { headers:{ "Content-Type":"multipart/form-data" } })
-  if(newItem.value.picturePreview) URL.revokeObjectURL(newItem.value.picturePreview)
-  newItem.value = { name:"", group_id:null, pictureFile:null, picturePreview:null }
+async function onItemAdd() {
+  if (!newItem.value.name.trim() || !newItem.value.group_id) return
+
+  const formData = new FormData()
+  formData.append("name", newItem.value.name.trim())
+  formData.append("group_id", String(newItem.value.group_id))
+  formData.append("price", String(newItem.value.price || 0))
+  if (newItem.value.pictureFile) {
+    formData.append("picture", newItem.value.pictureFile)
+  }
+
+  await axios.post("/api/menu/", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  })
+
+  newItem.value = {
+    name: "",
+    group_id: null,
+    price: 0,
+    pictureFile: null,
+    picturePreview: null,
+  }
+
   await fetchItems()
 }
 
-function onItemEditClick(it){
+function onItemEditClick(it) {
   itemToEdit.value = {
-    id: it.id, name: it.name,
-    _editGroupId: it.group?.id || it.group || null,
-    pictureUrl: it.pictureUrl || null
+    id: it.id,
+    name: it.name,
+    price: it.price ?? 0,
+    _editGroupId: it.group?.id ?? it.group_id ?? null,
+    pictureUrl: it.picture ?? null,
   }
   editPictureFile.value = null
-  new bootstrap.Modal(document.getElementById("editItemModal")).show()
+  // bootstrap берётся из index.html, как и в методичке
+  new bootstrap.Modal(document.getElementById("editMenuModal")).show()
 }
 
-async function onItemUpdate(){
-  if(!itemToEdit.value.name.trim()) return
-  const fd = new FormData()
-  fd.append("name", itemToEdit.value.name.trim())
-  if(itemToEdit.value._editGroupId) fd.append("group_id", itemToEdit.value._editGroupId)
-  if(editPictureFile.value) fd.append("picture", editPictureFile.value)
-  await axios.patch(`/api/menu/${itemToEdit.value.id}/`, fd, { headers:{ "Content-Type":"multipart/form-data" } })
-  if(itemToEdit.value.pictureUrl) URL.revokeObjectURL(itemToEdit.value.pictureUrl)
-  editPictureFile.value = null
+async function onItemUpdate() {
+  if (!itemToEdit.value.id || !itemToEdit.value.name.trim()) return
+
+  const formData = new FormData()
+  formData.append("name", itemToEdit.value.name.trim())
+  if (itemToEdit.value._editGroupId) {
+    formData.append("group_id", String(itemToEdit.value._editGroupId))
+  }
+  formData.append("price", String(itemToEdit.value.price || 0))
+  if (editPictureFile.value) {
+    formData.append("picture", editPictureFile.value)
+  }
+
+  await axios.put(`/api/menu/${itemToEdit.value.id}/`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  })
+
   await fetchItems()
 }
 
-async function onRemoveClick(it){
-  if(!confirm(`Удалить позицию "${it.name}"?`)) return
+async function onRemoveClick(it) {
+  if (!confirm(`Удалить позицию "${it.name}"?`)) return
   await axios.delete(`/api/menu/${it.id}/`)
   await fetchItems()
 }
 
-onBeforeMount(async ()=>{
+onBeforeMount(async () => {
   loading.value = true
-  try{ await Promise.all([fetchCategories(), fetchItems()]) } 
-  catch(e){ error.value = String(e) } 
-  finally{ loading.value = false }
+  error.value = ""
+  try {
+    await Promise.all([fetchCategories(), fetchItems()])
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 
 <template>
-  <div class="page">
-    <div v-if="error" class="alert alert-danger alert-inline">Ошибка: {{ error }}</div>
+  <div class="container my-4">
+    <h1 class="mb-3">Позиции меню</h1>
 
-    <div class="section">
-      <h3>Добавить блюдо</h3>
-      <form class="inline-form" @submit.prevent="onItemAdd">
-        <div class="form-floating">
-          <input class="form-control" v-model="newItem.name" placeholder="Название блюда" required />
-          <label>Название</label>
-        </div>
-
-        <div class="form-floating">
-          <select class="form-select" v-model="newItem.group_id" required>
-            <option value="" disabled>Категория…</option>
-            <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name ?? c.title }}</option>
-          </select>
-          <label>Категория</label>
-        </div>
-
-        <input type="file" class="form-control" accept="image/*" @change="itemAddPictureChange" />
-        <img v-if="newItem.picturePreview" :src="newItem.picturePreview" class="preview-img" alt="Превью" />
-
-        <button class="btn btn-primary">Добавить</button>
-      </form>
+    <div v-if="error" class="alert alert-danger" role="alert">
+      {{ error }}
     </div>
 
-    <div class="section">
-      <div class="table-wrap">
-        <table class="table table-bordered align-middle">
-          <thead>
-            <tr>
-              <th style="width:80px">ID</th><th style="width:100px">Изобр.</th>
-              <th>Название</th><th>Категория</th><th style="width:220px">Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="it in items" :key="it.id">
-              <td>{{ it.id }}</td>
-              <td>
-                <img v-if="it.pictureUrl" :src="it.pictureUrl" class="preview-img" style="max-width:80px" />
-                <span v-else class="badge badge-muted">Нет</span>
-              </td>
-              <td><input class="form-control form-control-sm" v-model="it.name" /></td>
-              <td>{{ it.group?.name ?? it.group?.title ?? ('#' + (typeof it.group === 'number' ? it.group : it.group?.id ?? '')) }}</td>
-              <td>
-                <button class="btn btn-sm btn-outline-success me-2" @click="onItemEditClick(it)">Редактировать</button>
-                <button class="btn btn-sm btn-outline-danger" @click="onRemoveClick(it)">Удалить</button>
-              </td>
-            </tr>
-            <tr v-if="!loading && !items.length"><td colspan="5" class="text-center text-muted">Пусто</td></tr>
-          </tbody>
-        </table>
+    <div class="card mb-4">
+      <div class="card-body">
+        <h5 class="card-title mb-3">Добавить позицию меню</h5>
+
+        <div class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label">Название</label>
+            <input
+              v-model="newItem.name"
+              type="text"
+              class="form-control"
+              placeholder="Название блюда"
+            />
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Категория</label>
+            <select
+              v-model="newItem.group_id"
+              class="form-select"
+            >
+              <option value="">Категория...</option>
+              <option
+                v-for="c in categories"
+                :key="c.id"
+                :value="c.id"
+              >
+                {{ c.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Цена</label>
+            <input
+              v-model.number="newItem.price"
+              type="number"
+              min="0"
+              step="0.01"
+              class="form-control"
+            />
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Изображение</label>
+            <input
+              type="file"
+              accept="image/*"
+              class="form-control"
+              @change="onAddPictureChange"
+            />
+          </div>
+        </div>
+
+        <div v-if="newItem.picturePreview" class="mt-3">
+          <img
+            :src="newItem.picturePreview"
+            alt="Превью"
+            class="img-thumbnail"
+            style="max-height: 160px"
+          />
+        </div>
+
+        <div class="mt-3">
+          <button
+            class="btn btn-primary"
+            type="button"
+            @click="onItemAdd"
+          >
+            Добавить
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- Modal -->
-    <div class="modal fade" id="editItemModal" tabindex="-1">
-      <div class="modal-dialog"><div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">Редактировать позицию</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title mb-3">Список позиций</h5>
+
+        <div v-if="loading" class="text-muted">
+          Загрузка...
         </div>
-        <div class="modal-body">
-          <div class="form-floating mb-3">
-            <input class="form-control" v-model="itemToEdit.name" placeholder="Название" />
-            <label>Название</label>
-          </div>
-          <div class="form-floating mb-3">
-            <select class="form-select" v-model="itemToEdit._editGroupId">
-              <option value="">—</option>
-              <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name ?? c.title }}</option>
-            </select>
-            <label>Категория</label>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Изображение</label>
-            <input type="file" class="form-control" accept="image/*" @change="onEditPictureChange" />
-            <div class="form-text">Оставьте пустым, чтобы не менять текущую картинку</div>
-          </div>
-          <img v-if="itemToEdit.pictureUrl" :src="itemToEdit.pictureUrl" class="preview-img" style="max-height:100px;max-width:150px" />
+
+        <div v-else-if="!items.length" class="text-muted">
+          Позиции ещё не добавлены
         </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-          <button class="btn btn-primary" @click="onItemUpdate" data-bs-dismiss="modal">Сохранить</button>
+
+        <div v-else class="list-group">
+          <div
+            v-for="it in items"
+            :key="it.id"
+            class="list-group-item d-flex align-items-center justify-content-between"
+          >
+            <div class="d-flex align-items-center gap-3">
+              <div v-if="it.picture">
+                <img
+                  :src="it.picture"
+                  alt=""
+                  class="rounded"
+                  style="width: 64px; height: 64px; object-fit: cover"
+                />
+              </div>
+              <div>
+                <div class="fw-semibold">{{ it.name }}</div>
+                <div class="text-muted small">
+                  ID: {{ it.id }}
+                  <span v-if="it.group">
+                    • Категория: {{ it.group.name }}
+                  </span>
+                  <span v-if="it.price !== undefined">
+                    • Цена: {{ Number(it.price).toFixed(2) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="btn-group">
+              <button
+                class="btn btn-sm btn-outline-primary"
+                type="button"
+                @click="onItemEditClick(it)"
+              >
+                Редактировать
+              </button>
+              <button
+                class="btn btn-sm btn-outline-danger"
+                type="button"
+                @click="onRemoveClick(it)"
+              >
+                Удалить
+              </button>
+            </div>
+          </div>
         </div>
-      </div></div>
+      </div>
+    </div>
+
+    <!-- Модалка редактирования позиции меню -->
+    <div
+      id="editMenuModal"
+      class="modal fade"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">
+              Редактировать позицию #{{ itemToEdit.id }}
+            </h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-md-5">
+                <label class="form-label">Название</label>
+                <input
+                  v-model="itemToEdit.name"
+                  type="text"
+                  class="form-control"
+                />
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Категория</label>
+                <select
+                  v-model="itemToEdit._editGroupId"
+                  class="form-select"
+                >
+                  <option
+                    v-for="c in categories"
+                    :key="c.id"
+                    :value="c.id"
+                  >
+                    {{ c.name }}
+                  </option>
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Цена</label>
+                <input
+                  v-model.number="itemToEdit.price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  class="form-control"
+                />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Изображение</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  class="form-control"
+                  @change="onEditPictureChange"
+                />
+                <div v-if="itemToEdit.pictureUrl" class="mt-2">
+                  <img
+                    :src="itemToEdit.pictureUrl"
+                    alt=""
+                    class="img-thumbnail"
+                    style="max-height: 140px"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Закрыть
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              @click="onItemUpdate"
+            >
+              Сохранить
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>

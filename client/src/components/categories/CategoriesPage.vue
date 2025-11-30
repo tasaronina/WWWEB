@@ -1,10 +1,10 @@
 <script setup>
 import axios from "axios"
 import { ref, onBeforeMount } from "vue"
-import Cookies from "js-cookie"
+
 import "@/styles/admin.css"
 
-axios.defaults.headers.common["X-CSRFToken"] = Cookies.get("csrftoken")
+
 
 const categories = ref([])
 const loading = ref(false)

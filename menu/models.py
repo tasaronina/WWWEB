@@ -13,9 +13,7 @@ class Category(models.Model):
 
 
 class Menu(models.Model):
-    # Делаем поле с дефолтом, чтобы Django не спрашивал,
-    # чем заполнить уже существующие записи в БД
-    name = models.TextField("Название", default="")
+    name = models.TextField("Название")
     group = models.ForeignKey(
         "Category",
         on_delete=models.CASCADE,
@@ -23,6 +21,8 @@ class Menu(models.Model):
         verbose_name="Категория",
         related_name="menus",
     )
+    # НОВОЕ ПОЛЕ ЦЕНЫ
+    price = models.DecimalField("Цена", max_digits=10, decimal_places=2, default=0)
     picture = models.ImageField("Изображение", null=True, upload_to="menus")
 
     class Meta:
@@ -30,20 +30,15 @@ class Menu(models.Model):
         verbose_name_plural = "Меню"
 
     def __str__(self) -> str:
-        return self.name or f"Меню #{self.pk}"
+        return self.name
 
 
 class Customer(models.Model):
     name = models.TextField("Имя")
-    phone = models.TextField("Телефон")
-    picture = models.ImageField("Изображение", null=True, upload_to="customers")
-    # user — чтобы можно было фильтровать по владельцу, но он НЕ обязателен
+    phone = models.TextField("Телефон", null=True)
+    picture = models.ImageField("Аватар", null=True, upload_to="customers")
     user = models.ForeignKey(
-        "auth.User",
-        on_delete=models.CASCADE,
-        verbose_name="Пользователь",
-        null=True,
-        blank=True,
+        "auth.User", on_delete=models.CASCADE, null=True, verbose_name="Пользователь"
     )
 
     class Meta:
@@ -51,24 +46,24 @@ class Customer(models.Model):
         verbose_name_plural = "Клиенты"
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.phone})"
+        return self.name
 
 
 class Order(models.Model):
+    STATUS_CHOICES = [
+        ("NEW", "Новый"),
+        ("IN_PROGRESS", "В работе"),
+        ("DONE", "Готов"),
+        ("CANCELLED", "Отменён"),
+    ]
+
     customer = models.ForeignKey(
-        "Customer",
-        on_delete=models.CASCADE,
-        verbose_name="Клиент",
-        related_name="orders",
+        Customer, on_delete=models.CASCADE, verbose_name="Клиент", related_name="orders"
     )
     created_at = models.DateTimeField("Создан", auto_now_add=True)
-    status = models.TextField("Статус", default="NEW")  # NEW / PAID / CANCELED
+    status = models.TextField("Статус", choices=STATUS_CHOICES, default="NEW")
     user = models.ForeignKey(
-        "auth.User",
-        on_delete=models.CASCADE,
-        verbose_name="Пользователь",
-        null=True,
-        blank=True,
+        "auth.User", on_delete=models.CASCADE, null=True, verbose_name="Пользователь"
     )
 
     class Meta:
@@ -81,22 +76,20 @@ class Order(models.Model):
 
 class OrderItem(models.Model):
     order = models.ForeignKey(
-        "Order",
-        on_delete=models.CASCADE,
-        verbose_name="Заказ",
-        related_name="items",
+        Order, on_delete=models.CASCADE, verbose_name="Заказ", related_name="items"
     )
     menu = models.ForeignKey(
-        "Menu",
+        Menu,
         on_delete=models.PROTECT,
         verbose_name="Позиция меню",
         related_name="order_items",
+        null=True,
     )
-    qty = models.IntegerField("Кол-во", default=1)
+    qty = models.PositiveIntegerField("Количество", default=1)
 
     class Meta:
         verbose_name = "Позиция заказа"
         verbose_name_plural = "Позиции заказа"
 
     def __str__(self) -> str:
-        return f"{self.menu} x {self.qty} (заказ #{self.order_id})"
+        return f"{self.menu} x {self.qty}"
