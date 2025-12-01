@@ -1,26 +1,22 @@
 <script setup>
 import axios from "axios"
 import { ref, computed, onBeforeMount } from "vue"
+import { downloadExport } from "@/api"
 import "bootstrap/dist/js/bootstrap.bundle.min.js"
 import "@/styles/admin.css"
 
 axios.defaults.withCredentials = true
 
+
 const canAdmin = ref(false)
 async function detectAdmin(){
-  if (typeof window!=="undefined" && (window.IS_ADMIN===true||window.__CAN_ADMIN__===true||window.vCanAdmin===true)) return true
-  try{ if(localStorage.getItem("is_admin")==="1") return true }catch{}
-  const eps=["/api/me/","/api/auth/me/","/api/users/me/","/api/user/","/api/whoami/"]
-  for(const ep of eps){
-    try{
-      const {data}=await axios.get(ep)
-      if(!data) continue
-      const role=(data.role||"").toString().toLowerCase()
-      if(data.is_superuser||data.is_staff||data.is_admin||["admin","staff","manager","superuser"].includes(role)) return true
-    }catch{}
-  }
-  return false
+  try {
+    const { data } = await axios.get("/api/auth/me/")
+    canAdmin.value = !!(data?.is_superuser || data?.is_staff)
+  } catch { canAdmin.value = false }
+  return canAdmin.value
 }
+
 
 const orders = ref([])
 const customers = ref([])
@@ -36,127 +32,144 @@ const newItemForOrder = ref({ menu_id: "", qty: 1 })
 const modalItemsLoading = ref(false)
 
 const filters = ref({ id: "", customer: "", status: "all", date: "" })
-const STATUS_OPTIONS = ["NEW", "IN_PROGRESS", "DONE", "CANCELLED"]
+const STATUS_OPTIONS = ["NEW","IN_PROGRESS","DONE","CANCELLED"]
 
-function formatNumber(v) { if (v === null || v === undefined) return "—"; const n = Number(v); return Number.isNaN(n) ? "—" : n.toFixed(2) }
-function customerLabel(raw) { if (!raw) return ""; if (typeof raw === "object") return raw.name ?? raw.fio ?? raw.username ?? raw.email ?? `Клиент #${raw.id ?? ""}`; return `Клиент #${raw}` }
-const menuMap = computed(() => { const m = new Map(); for (const it of menuItems.value) m.set(it.id, it); return m })
-function menuTitle(raw) { if (!raw) return ""; if (typeof raw === "object") return raw.name ?? raw.title ?? `Позиция #${raw.id ?? ""}`; const found = menuMap.value.get(raw); return found ? (found.name ?? found.title ?? `Позиция #${found.id}`) : `Позиция #${raw}` }
-function menuPrice(raw) { if (!raw) return 0; if (typeof raw === "object") return Number(raw.price || 0); const found = menuMap.value.get(raw); return Number(found?.price || 0) }
-const currentOrderTotal = computed(() => orderItemsForEdit.value.reduce((s, it) => s + menuPrice(it.menu ?? it.menu_id) * Number(it.qty || 0), 0))
 
-async function fetchCustomers() { const { data } = await axios.get("/api/customers/"); customers.value = data }
-async function fetchOrders() { const { data } = await axios.get("/api/orders/"); orders.value = data }
-async function fetchMenu() { const { data } = await axios.get("/api/menu/"); menuItems.value = data }
-async function fetchStats() { const { data } = await axios.get("/api/orders/stats/"); stats.value = data }
-async function fetchOrderItems(orderId) {
-  modalItemsLoading.value = true
-  try {
-    const { data } = await axios.get(`/api/order-items/?order_id=${orderId}`)
-    orderItemsForEdit.value = data.map((it) => ({ ...it, qty: it.qty ?? 1, _origQty: Number(it.qty ?? 1) }))
-  } finally { modalItemsLoading.value = false }
+function formatNumber(v){ if(v===null||v===undefined) return "—"; const n=Number(v); return Number.isNaN(n)?"—":n.toFixed(2) }
+function customerLabel(raw){ if(!raw) return ""; if(typeof raw==="object") return raw.name ?? raw.fio ?? raw.username ?? raw.email ?? `Клиент #${raw.id??""}`; return `Клиент #${raw}` }
+
+const menuMap = computed(()=>{ const m = new Map(); for(const it of menuItems.value) m.set(it.id, it); return m })
+function menuTitle(raw){ if(!raw) return ""; if(typeof raw==="object") return raw.name ?? raw.title ?? `Позиция #${raw.id??""}`; const found=menuMap.value.get(raw); return found?(found.name ?? found.title ?? `Позиция #${found.id}`):`Позиция #${raw}` }
+function menuPrice(raw){ if(!raw) return 0; if(typeof raw==="object") return Number(raw.price||0); const found=menuMap.value.get(raw); return Number(found?.price||0) }
+const currentOrderTotal = computed(()=>orderItemsForEdit.value.reduce((s,it)=>s+menuPrice(it.menu??it.menu_id)*Number(it.qty||0),0))
+
+
+async function fetchCustomers(){ const {data}=await axios.get("/api/customers/"); customers.value=data }
+async function fetchOrders(){ const {data}=await axios.get("/api/orders/"); orders.value=data }
+async function fetchMenu(){ const {data}=await axios.get("/api/menu/"); menuItems.value=data }
+async function fetchStats(){ try{ const {data}=await axios.get("/api/orders/stats/"); stats.value=data }catch{ stats.value=null } }
+async function fetchOrderItems(orderId){
+  modalItemsLoading.value=true
+  try{
+    const {data}=await axios.get(`/api/order-items/?order_id=${orderId}`)
+    orderItemsForEdit.value=data.map(it=>({ ...it, qty: it.qty ?? 1, _origQty: Number(it.qty ?? 1) }))
+  } finally { modalItemsLoading.value=false }
 }
-async function refreshOrders() { await Promise.all([fetchOrders(), fetchStats()]) }
+async function refreshOrders(){ await Promise.all([fetchOrders(), fetchStats()]) }
 
-onBeforeMount(async () => {
-  canAdmin.value = await detectAdmin()
-  loading.value = true; error.value = ""
-  try { await Promise.all([fetchCustomers(), fetchMenu(), fetchOrders(), fetchStats()]) }
-  catch (e) { error.value = "Не удалось загрузить данные" }
-  finally { loading.value = false }
+
+onBeforeMount(async()=>{
+  await detectAdmin()
+  loading.value=true; error.value=""
+  try{ await Promise.all([fetchCustomers(), fetchMenu(), fetchOrders(), fetchStats()]) }
+  catch(e){ error.value="Не удалось загрузить данные" }
+  finally{ loading.value=false }
 })
 
-async function onOrderAdd() {
-  if (!canAdmin.value) return
-  if (!orderToAdd.value.customer_id) return
-  const payload = { customer_id: Number(orderToAdd.value.customer_id), status: orderToAdd.value.status || "NEW" }
-  const { data } = await axios.post("/api/orders/", payload)
-  orderToAdd.value = { customer_id: "", status: "NEW" }
+
+async function onOrderAdd(){
+  if(!canAdmin.value) return
+  if(!orderToAdd.value.customer_id) return
+  await axios.post("/api/orders/", { customer_id: Number(orderToAdd.value.customer_id), status: orderToAdd.value.status||"NEW" })
+  orderToAdd.value={ customer_id:"", status:"NEW" }
   await refreshOrders()
-  openEditModal(data)
 }
 
-function openEditModal(order) {
-  if (!canAdmin.value) return
-  orderToEdit.value = { id: order.id, customer_id: order.customer?.id ?? order.customer_id ?? order.customer ?? "", status: order.status || "NEW" }
-  newItemForOrder.value = { menu_id: "", qty: 1 }
+function openEditModal(order){
+  if(!canAdmin.value) return
+  orderToEdit.value={ id:order.id, customer_id:order.customer?.id ?? order.customer_id ?? order.customer ?? "", status:order.status||"NEW" }
+  newItemForOrder.value={ menu_id:"", qty:1 }
   fetchOrderItems(order.id)
-  const el = document.getElementById("editOrderModal")
-  if (el && window.bootstrap) window.bootstrap.Modal.getOrCreateInstance(el).show()
+  const el=document.getElementById("editOrderModal")
+  if(el && window.bootstrap) window.bootstrap.Modal.getOrCreateInstance(el).show()
 }
+function onOrderEditClick(order){ if(!canAdmin.value) return; openEditModal(order) }
 
-function onOrderEditClick(order) { if (!canAdmin.value) return; openEditModal(order) }
-
-async function syncOrderItems() {
-  if (!canAdmin.value) return
-  const promises = []
-  if (newItemForOrder.value.menu_id) {
-    promises.push(axios.post("/api/order-items/", { order_id: orderToEdit.value.id, menu_id: Number(newItemForOrder.value.menu_id), qty: Number(newItemForOrder.value.qty) || 1 }))
+async function syncOrderItems(){
+  if(!canAdmin.value) return
+  const ps=[]
+  if(newItemForOrder.value.menu_id){
+    ps.push(axios.post("/api/order-items/", { order_id:orderToEdit.value.id, menu_id:Number(newItemForOrder.value.menu_id), qty:Number(newItemForOrder.value.qty)||1 }))
   }
-  for (const it of orderItemsForEdit.value) {
-    const newQty = Number(it.qty || 1)
-    if (!Number.isNaN(newQty) && newQty >= 1 && it._origQty !== newQty) promises.push(axios.patch(`/api/order-items/${it.id}/`, { qty: newQty }))
+  for(const it of orderItemsForEdit.value){
+    const newQty=Number(it.qty||1)
+    if(!Number.isNaN(newQty) && newQty>=1 && it._origQty!==newQty){
+      ps.push(axios.patch(`/api/order-items/${it.id}/`, { qty:newQty }))
+    }
   }
-  if (promises.length) await Promise.all(promises)
-  newItemForOrder.value = { menu_id: "", qty: 1 }
+  if(ps.length) await Promise.all(ps)
+  newItemForOrder.value={ menu_id:"", qty:1 }
   await fetchOrderItems(orderToEdit.value.id)
 }
 
-async function onOrderUpdate() {
-  if (!canAdmin.value) return
-  if (!orderToEdit.value.id || !orderToEdit.value.customer_id) return
+async function onOrderUpdate(){
+  if(!canAdmin.value) return
+  if(!orderToEdit.value.id || !orderToEdit.value.customer_id) return
   await syncOrderItems()
-  const STATUS_OPTIONS = ["NEW","IN_PROGRESS","DONE","CANCELLED"]
   const safeStatus = STATUS_OPTIONS.includes(orderToEdit.value.status) ? orderToEdit.value.status : "NEW"
-  await axios.patch(`/api/orders/${orderToEdit.value.id}/`, { customer_id: Number(orderToEdit.value.customer_id), status: safeStatus })
+  await axios.patch(`/api/orders/${orderToEdit.value.id}/`, { customer_id:Number(orderToEdit.value.customer_id), status:safeStatus })
   await refreshOrders()
-  const el = document.getElementById("editOrderModal")
-  if (el && window.bootstrap) window.bootstrap.Modal.getInstance(el)?.hide()
+  const el=document.getElementById("editOrderModal")
+  if(el && window.bootstrap) window.bootstrap.Modal.getInstance(el)?.hide()
 }
 
-async function onRemoveClick(order) {
-  if (!canAdmin.value) return
-  if (!confirm(`Удалить заказ #${order.id}?`)) return
+async function onRemoveClick(order){
+  if(!canAdmin.value) return
+  if(!confirm(`Удалить заказ #${order.id}?`)) return
   await axios.delete(`/api/orders/${order.id}/`)
   await refreshOrders()
 }
 
-async function onOrderItemSave(item) {
-  if (!canAdmin.value) return
-  await axios.patch(`/api/order-items/${item.id}/`, { order_id: orderToEdit.value.id, menu_id: item.menu?.id ?? item.menu_id, qty: Number(item.qty) || 1 })
+async function onOrderItemSave(item){
+  if(!canAdmin.value) return
+  await axios.patch(`/api/order-items/${item.id}/`, { order_id:orderToEdit.value.id, menu_id:item.menu?.id ?? item.menu_id, qty:Number(item.qty)||1 })
   await Promise.all([fetchOrderItems(orderToEdit.value.id), refreshOrders()])
 }
-async function onOrderItemRemove(item) {
-  if (!canAdmin.value) return
-  if (!confirm("Удалить позицию из заказа?")) return
+async function onOrderItemRemove(item){
+  if(!canAdmin.value) return
+  if(!confirm("Удалить позицию из заказа?")) return
   await axios.delete(`/api/order-items/${item.id}/`)
   await Promise.all([fetchOrderItems(orderToEdit.value.id), refreshOrders()])
 }
-async function onOrderItemAdd() {
-  if (!canAdmin.value) return
-  if (!orderToEdit.value.id || !newItemForOrder.value.menu_id) return
-  await axios.post("/api/order-items/", { order_id: orderToEdit.value.id, menu_id: Number(newItemForOrder.value.menu_id), qty: Number(newItemForOrder.value.qty) || 1 })
-  newItemForOrder.value = { menu_id: "", qty: 1 }
+async function onOrderItemAdd(){
+  if(!canAdmin.value) return
+  if(!orderToEdit.value.id || !newItemForOrder.value.menu_id) return
+  await axios.post("/api/order-items/", { order_id:orderToEdit.value.id, menu_id:Number(newItemForOrder.value.menu_id), qty:Number(newItemForOrder.value.qty)||1 })
+  newItemForOrder.value={ menu_id:"", qty:1 }
   await Promise.all([fetchOrderItems(orderToEdit.value.id), refreshOrders()])
 }
 
-const filteredOrders = computed(() => {
+
+const filteredOrders = computed(()=>{
   const idPart = filters.value.id.trim()
   const customerPart = filters.value.customer.trim().toLowerCase()
   const status = filters.value.status
   const date = filters.value.date
-  return orders.value.filter((o) => {
-    if (idPart && !String(o.id).includes(idPart)) return false
-    if (customerPart && !customerLabel(o.customer).toLowerCase().includes(customerPart)) return false
-    if (status !== "all" && o.status !== status) return false
-    if (date) {
-      const only = o.created_at ? new Date(o.created_at).toISOString().slice(0, 10) : ""
-      if (only !== date) return false
+  return orders.value.filter(o=>{
+    if(idPart && !String(o.id).includes(idPart)) return false
+    if(customerPart && !customerLabel(o.customer).toLowerCase().includes(customerPart)) return false
+    if(status !== "all" && o.status !== status) return false
+    if(date){
+      const only = o.created_at ? new Date(o.created_at).toISOString().slice(0,10) : ""
+      if(only !== date) return false
     }
     return true
   })
 })
-function resetFilters() { filters.value = { id: "", customer: "", status: "all", date: "" } }
+function resetFilters(){ filters.value={ id:"", customer:"", status:"all", date:"" } }
+
+function buildExportParams(){
+  const p={}
+  if(filters.value.status !== "all") p.status = filters.value.status
+  if(filters.value.date) p.date_from = p.date_to = filters.value.date
+  if(filters.value.id) p.search = filters.value.id
+  if(filters.value.customer) p.search = (p.search ? (p.search+" ") : "") + filters.value.customer
+  return p
+}
+async function exportOrders(type){
+  if(!canAdmin.value) return
+  await downloadExport("orders", buildExportParams(), type, "orders")
+}
 </script>
 
 <template>
@@ -165,6 +178,7 @@ function resetFilters() { filters.value = { id: "", customer: "", status: "all",
 
     <div v-if="error" class="alert alert-danger alert-inline">Ошибка: {{ error }}</div>
 
+  
     <div class="card mb-4" v-if="canAdmin">
       <div class="card-body">
         <div class="row g-2 align-items-end">
@@ -191,6 +205,7 @@ function resetFilters() { filters.value = { id: "", customer: "", status: "all",
       </div>
     </div>
 
+   
     <div v-if="stats" class="alert alert-secondary small mb-3">
       <div class="d-flex flex-wrap gap-3">
         <span>Всего заказов: <strong>{{ stats.count }}</strong></span>
@@ -200,6 +215,7 @@ function resetFilters() { filters.value = { id: "", customer: "", status: "all",
       </div>
     </div>
 
+    
     <div class="card mb-3">
       <div class="card-body">
         <div class="row g-2 align-items-center">
@@ -217,9 +233,15 @@ function resetFilters() { filters.value = { id: "", customer: "", status: "all",
           <div class="col-md-3"><input v-model="filters.date" type="date" class="form-control" /></div>
           <div class="col-md-1 d-grid"><button class="btn btn-outline-secondary" @click="resetFilters">Сброс</button></div>
         </div>
+
+        <div class="mt-3 d-flex gap-2" v-if="canAdmin">
+          <button class="btn btn-success" type="button" @click="exportOrders('excel')">Экспорт в Excel</button>
+          <button class="btn btn-primary" type="button" @click="exportOrders('word')">Экспорт в Word</button>
+        </div>
       </div>
     </div>
 
+    <!-- таблица -->
     <div class="card">
       <div class="card-body table-responsive">
         <table class="table align-middle mb-0">
@@ -254,6 +276,7 @@ function resetFilters() { filters.value = { id: "", customer: "", status: "all",
       </div>
     </div>
 
+    <!-- модалка редактирования только админ -->
     <div id="editOrderModal" class="modal fade" tabindex="-1" aria-hidden="true" v-if="canAdmin">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">

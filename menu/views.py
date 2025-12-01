@@ -10,7 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.views import APIView
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from .models import Category, Customer, Menu, Order, OrderItem
 from .serializers import (
@@ -27,10 +27,10 @@ class ShowMenuView(TemplateView):
     template_name = "menu/show_menu.html"
 
 
-
+# ---- служебные вьюхи для фронта ----
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")
-class CSRFView(APIView):
+class CsrfView(APIView):
     """
     GET /api/csrf/ — устанавливает CSRF cookie (csrftoken)
     """
@@ -44,17 +44,14 @@ class CSRFView(APIView):
 class LoginView(APIView):
     """
     POST /api/auth/login/ {username, password}
-    Если пользователь уже аутентифицирован, возвращаем OK без ошибок.
+    Если пользователь уже аутентифицирован — возвращаем OK.
     """
     permission_classes = [AllowAny]
 
     def post(self, request):
-        # Уже есть сессия считаем логин успешным
         if request.user.is_authenticated:
-            return Response({
-                "detail": "already authenticated",
-                "username": request.user.username,
-            })
+            return Response({"detail": "already authenticated",
+                             "username": request.user.username})
 
         username = request.data.get("username")
         password = request.data.get("password")
@@ -67,8 +64,10 @@ class LoginView(APIView):
 
 class LogoutView(APIView):
     """
-    POST /api/auth/logout/ — завершает сессию
+    POST /api/auth/logout/
     """
+    permission_classes = [AllowAny]
+
     def post(self, request):
         logout(request)
         return Response({"detail": "ok"})
@@ -76,29 +75,24 @@ class LogoutView(APIView):
 
 class MeView(APIView):
     """
-    GET /api/auth/me/ — информация о текущем пользователе
+    GET /api/me/ (и алиасы) — информация о текущем пользователе
     """
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
-        if not request.user.is_authenticated:
-            return Response({"id": None, "username": None, "is_authenticated": False})
-        profile = getattr(request.user, "profile", None)
-        profile_data = None
-        if profile:
-            profile_data = {
-                "role": profile.role,
-                "twofa_passed": profile.twofa_passed,
-                "twofa_expires_at": profile.twofa_expires_at,
-            }
+        u = request.user
         return Response({
-            "id": request.user.id,
-            "username": request.user.username,
-            "is_staff": request.user.is_staff,
-            "is_superuser": request.user.is_superuser,
-            "profile": profile_data,
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "is_authenticated": True,
+            "is_staff": u.is_staff,
+            "is_superuser": u.is_superuser,
+            "is_admin": bool(u.is_staff or u.is_superuser),
         })
 
 
-
+# ---- твои CRUD вьюсеты ----
 
 class CategoryViewSet(ModelViewSet):
     queryset = Category.objects.all().order_by("id")
@@ -119,8 +113,7 @@ class CategoryViewSet(ModelViewSet):
             max=Max("id"),
             min=Min("id"),
         )
-        serializer = self.StatsSerializer(instance=stats)
-        return Response(serializer.data)
+        return Response(self.StatsSerializer(instance=stats).data)
 
 
 class CustomerViewSet(ModelViewSet):
@@ -146,8 +139,7 @@ class CustomerViewSet(ModelViewSet):
             max=Max("id"),
             min=Min("id"),
         )
-        serializer = self.StatsSerializer(instance=stats)
-        return Response(serializer.data)
+        return Response(self.StatsSerializer(instance=stats).data)
 
 
 class MenuViewSet(ModelViewSet):
@@ -169,16 +161,11 @@ class MenuViewSet(ModelViewSet):
             max=Max("price"),
             min=Min("price"),
         )
-        serializer = self.StatsSerializer(instance=stats)
-        return Response(serializer.data)
+        return Response(self.StatsSerializer(instance=stats).data)
 
 
 class OrderViewSet(ModelViewSet):
-    queryset = (
-        Order.objects.select_related("customer")
-        .prefetch_related("items__menu")
-        .order_by("-id")
-    )
+    queryset = Order.objects.select_related("customer").prefetch_related("items__menu").order_by("-id")
     serializer_class = OrderSerializer
     permission_classes = [IsAdminOrReadOnly]
 
@@ -200,8 +187,7 @@ class OrderViewSet(ModelViewSet):
             max=Max("id"),
             min=Min("id"),
         )
-        serializer = self.StatsSerializer(instance=stats)
-        return Response(serializer.data)
+        return Response(self.StatsSerializer(instance=stats).data)
 
     def destroy(self, request, *args, **kwargs):
         obj = self.get_object()
@@ -221,10 +207,7 @@ class OrderItemViewSet(ModelViewSet):
         min = serializers.IntegerField()
 
     def get_queryset(self):
-        qs = (
-            OrderItem.objects.select_related("order", "menu", "menu__group")
-            .order_by("id")
-        )
+        qs = OrderItem.objects.select_related("order", "menu", "menu__group").order_by("id")
         order_id = self.request.query_params.get("order_id")
         if order_id:
             try:
@@ -241,5 +224,4 @@ class OrderItemViewSet(ModelViewSet):
             max=Max("qty"),
             min=Min("qty"),
         )
-        serializer = self.StatsSerializer(instance=stats)
-        return Response(serializer.data)
+        return Response(self.StatsSerializer(instance=stats).data)

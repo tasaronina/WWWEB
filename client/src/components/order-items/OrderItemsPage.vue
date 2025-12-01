@@ -1,253 +1,180 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeMount } from "vue";
-import { apiGet, apiPost, apiPatch, apiDelete } from "@/api";
-import axios from "axios";
-import "@/styles/admin.css";
+import axios from "axios"
+import { ref, onMounted, computed } from "vue"
+import { downloadExport } from "@/api"
+import "@/styles/admin.css"
 
 axios.defaults.withCredentials = true
 
 const canAdmin = ref(false)
 async function detectAdmin(){
-  if (typeof window!=="undefined" && (window.IS_ADMIN===true||window.__CAN_ADMIN__===true||window.vCanAdmin===true)) return true
-  try{ if(localStorage.getItem("is_admin")==="1") return true }catch{}
-  const eps=["/api/me/","/api/auth/me/","/api/users/me/","/api/user/","/api/whoami/"]
-  for(const ep of eps){
-    try{
-      const {data}=await axios.get(ep)
-      if(!data) continue
-      const role=(data.role||"").toString().toLowerCase()
-      if(data.is_superuser||data.is_staff||data.is_admin||["admin","staff","manager","superuser"].includes(role)) return true
-    }catch{}
-  }
-  return false
+  try{ const {data}=await axios.get("/api/auth/me/"); canAdmin.value=!!(data?.is_superuser||data?.is_staff) }catch{ canAdmin.value=false }
+  return canAdmin.value
 }
 
-const items = ref([]);
-const orders = ref([]);
-const menuItems = ref([]);
-const stats = ref({});
+const orders = ref([])
+const menu = ref([])
+const items = ref([])
+const stats = ref(null)
+const loading = ref(false)
+const error = ref("")
 
-const loading = ref(false);
-const error = ref("");
+const form = ref({ order_id: "", menu_id: "", qty: 1 })
 
-const newItem = ref({ order_id: "", menu_id: "", qty: 1 });
+const filters = ref({ id:"", order:"", menuText:"", qty:"" })
 
-const filters = ref({ id: "", order: "", menu: "", qty: "" });
+function menuTitle(m){ if(!m) return ""; if(typeof m==="object") return m.name ?? m.title ?? `Позиция #${m.id}`; return `Позиция #${m}` }
 
-const ordersMap = computed(() => { const m = new Map(); orders.value.forEach((o) => m.set(o.id, o)); return m; });
-const menuMap = computed(() => { const m = new Map(); menuItems.value.forEach((mi) => m.set(mi.id, mi)); return m; });
+async function fetchOrders(){ const {data}=await axios.get("/api/orders/"); orders.value=data }
+async function fetchMenu(){ const {data}=await axios.get("/api/menu/"); menu.value=data }
+async function fetchItems(){ const {data}=await axios.get("/api/order-items/"); items.value=data }
+async function fetchStats(){ try{ const {data}=await axios.get("/api/order-items/stats/"); stats.value=data }catch{ stats.value=null } }
 
-function rawId(x) { return typeof x === "object" ? x?.id : x }
+onMounted(async ()=>{
+  await detectAdmin()
+  loading.value=true; error.value=""
+  try{ await Promise.all([fetchOrders(), fetchMenu(), fetchItems(), fetchStats()]) }
+  catch(e){ error.value="Не удалось загрузить позиции заказа" }
+  finally{ loading.value=false }
+})
 
-function customerLabel(raw) {
-  if (!raw) return "";
-  if (typeof raw === "object") return raw.name || raw.fio || raw.username || raw.email || `Клиент #${raw.id ?? ""}`;
-  const found = ordersMap.value.get(raw);
-  if (found && typeof found.customer === "object") {
-    const c = found.customer;
-    return c.name || c.fio || c.username || c.email || `Клиент #${c.id ?? ""}`;
-  }
-  return `Клиент #${raw}`;
-}
-function orderLabel(raw) {
-  if (!raw) return "";
-  if (typeof raw === "object") { const id = raw.id ?? ""; const client = customerLabel(raw.customer); return client ? `#${id} — ${client}` : `#${id}`; }
-  const found = ordersMap.value.get(raw);
-  if (found) { const client = customerLabel(found.customer); return client ? `#${found.id} — ${client}` : `#${found.id}`; }
-  return `#${raw}`;
-}
-function menuLabel(raw) {
-  if (!raw) return "";
-  if (typeof raw === "object") return raw.name || raw.title || `Поз. #${raw.id ?? ""}`;
-  const found = menuMap.value.get(raw);
-  if (found) return found.name || found.title || `Поз. #${found.id}`;
-  return `Поз. #${raw}`;
+async function onCreate(){
+  if(!canAdmin.value) return
+  if(!form.value.order_id || !form.value.menu_id) return
+  await axios.post("/api/order-items/", { order_id:Number(form.value.order_id), menu_id:Number(form.value.menu_id), qty:Number(form.value.qty)||1 })
+  form.value={ order_id:"", menu_id:"", qty:1 }
+  await Promise.all([fetchItems(), fetchStats()])
 }
 
-const itemStats = computed(() => {
-  const ids = items.value.map((i) => i.id);
-  if (!ids.length) return { count: 0, avg: null, max: null, min: null };
-  const sumIds = ids.reduce((acc, x) => acc + x, 0);
-  return { count: ids.length, avg: sumIds / ids.length, max: Math.max(...ids), min: Math.min(...ids) };
-});
-
-const filteredItems = computed(() => {
-  const idPart = filters.value.id.trim();
-  const orderPart = filters.value.order.trim().toLowerCase();
-  const menuPart = filters.value.menu.trim().toLowerCase();
-  const qtyPart = filters.value.qty.trim();
-  return items.value.filter((it) => {
-    if (idPart && !String(it.id).includes(idPart)) return false;
-    if (orderPart && !orderLabel(it.order).toLowerCase().includes(orderPart)) return false;
-    if (menuPart && !menuLabel(it.menu).toLowerCase().includes(menuPart)) return false;
-    const qtyVal = it.qty ?? it.quantity ?? "";
-    if (qtyPart && !String(qtyVal).includes(qtyPart)) return false;
-    return true;
-  });
-});
-
-function resetFilters(){ filters.value = { id: "", order: "", menu: "", qty: "" } }
-
-async function loadData() {
-  loading.value = true; error.value = "";
-  try {
-    const [itemsData, ordersData, menuData, statsData] = await Promise.all([
-      apiGet("order-items/"), apiGet("orders/"), apiGet("menu/"), apiGet("order-items/stats/"),
-    ]);
-    orders.value = ordersData;
-    menuItems.value = menuData;
-    stats.value = statsData || {};
-    items.value = itemsData.map((it) => ({ ...it, isEditing: false, edits: null }));
-  } catch (e) {
-    error.value = "Не удалось загрузить позиции заказа";
-  } finally { loading.value = false }
+async function onDelete(it){
+  if(!canAdmin.value) return
+  if(!confirm("Удалить позицию?")) return
+  await axios.delete(`/api/order-items/${it.id}/`)
+  await Promise.all([fetchItems(), fetchStats()])
 }
 
-async function handleCreate() {
-  if (!canAdmin.value) return;
-  if (!newItem.value.order_id || !newItem.value.menu_id) return;
-  try {
-    await apiPost("order-items/", {
-      order_id: Number(newItem.value.order_id),
-      menu_id: Number(newItem.value.menu_id),
-      qty: Number(newItem.value.qty || 1),
-    });
-    newItem.value = { order_id: "", menu_id: "", qty: 1 };
-    await loadData();
-  } catch (e) { error.value = "Не удалось создать позицию заказа" }
+async function onSave(it){
+  if(!canAdmin.value) return
+  await axios.patch(`/api/order-items/${it.id}/`, { qty: Number(it.qty)||1 })
+  await Promise.all([fetchItems(), fetchStats()])
 }
 
-function startEditRow(row) {
-  if (!canAdmin.value) return;
-  row.isEditing = true;
-  row.edits = { order_id: rawId(row.order), menu_id: rawId(row.menu), qty: Number(row.qty ?? row.quantity ?? 1) };
-}
-function cancelEditRow(row) { row.isEditing = false; row.edits = null }
-async function saveEditRow(row) {
-  if (!canAdmin.value || !row?.edits) return;
-  try {
-    await apiPatch(`order-items/${row.id}/`, {
-      order_id: Number(row.edits.order_id),
-      menu_id: Number(row.edits.menu_id),
-      qty: Number(row.edits.qty || 1),
-    });
-    await loadData();
-  } catch (e) { error.value = "Не удалось сохранить позицию" }
-  finally { row.isEditing = false; row.edits = null }
-}
-async function handleDeleteRow(row) {
-  if (!canAdmin.value) return;
-  if (!confirm(`Удалить позицию #${row.id}?`)) return;
-  try { await apiDelete(`order-items/${row.id}/`); await loadData() }
-  catch (e) { error.value = "Не удалось удалить позицию" }
+function buildExportParams(){ return {} }
+async function onExport(type){
+  if(!canAdmin.value) return
+  await downloadExport("order-items", buildExportParams(), type, "order_items")
 }
 
-onBeforeMount(async ()=>{ canAdmin.value = await detectAdmin() })
-onMounted(loadData);
+const filteredList = computed(()=>{
+  const id = filters.value.id.trim()
+  const ord = filters.value.order.trim()
+  const mtxt = filters.value.menuText.trim().toLowerCase()
+  const q = filters.value.qty.trim()
+  return items.value.filter(it=>{
+    if(id && !String(it.id).includes(id)) return false
+    if(ord && !String(it.order?.id ?? it.order_id).includes(ord)) return false
+    const title = (it.menu?.name ?? it.menu?.title ?? `Позиция #${it.menu?.id ?? it.menu_id}`)+""
+    if(mtxt && !title.toLowerCase().includes(mtxt)) return false
+    if(q && !String(it.qty).includes(q)) return false
+    return true
+  })
+})
+function resetFilters(){ filters.value = { id:"", order:"", menuText:"", qty:"" } }
 </script>
 
 <template>
-  <div class="container mt-4">
+  <div class="container my-4">
     <h1 class="mb-3">Добавить позицию заказа</h1>
 
-    <div class="alert alert-light border mb-4">
+    <div v-if="error" class="alert alert-danger">Не удалось загрузить позиции заказа</div>
+
+
+    <div v-if="stats" class="alert alert-secondary small mb-3">
       <div class="d-flex flex-wrap gap-3">
-        <span>Всего позиций: <strong>{{ itemStats.count }}</strong></span>
-        <span>Средний ID: <strong>{{ itemStats.avg != null ? itemStats.avg.toFixed(2) : "—" }}</strong></span>
-        <span>Максимальный ID: <strong>{{ itemStats.max ?? "—" }}</strong></span>
-        <span>Минимальный ID: <strong>{{ itemStats.min ?? "—" }}</strong></span>
+        <span>Всего позиций: <strong>{{ stats.count }}</strong></span>
+        <span>Средний ID: <strong>{{ stats.avg?.toFixed ? stats.avg.toFixed(2) : stats.avg }}</strong></span>
+        <span>Максимальный ID: <strong>{{ stats.max }}</strong></span>
+        <span>Минимальный ID: <strong>{{ stats.min }}</strong></span>
       </div>
     </div>
 
-    <form class="row g-3 align-items-end mb-4" @submit.prevent="handleCreate" v-if="canAdmin">
+    <!-- создание только админ -->
+    <div class="row g-2 align-items-end mb-3" v-if="canAdmin">
       <div class="col-md-4">
         <label class="form-label">Заказ</label>
-        <select v-model="newItem.order_id" class="form-select">
+        <select v-model="form.order_id" class="form-select">
           <option value="">Выберите заказ...</option>
-          <option v-for="o in orders" :key="o.id" :value="o.id">{{ orderLabel(o) }}</option>
+          <option v-for="o in orders" :key="o.id" :value="o.id">#{{ o.id }} — {{ o.customer?.name ?? 'без клиента' }}</option>
         </select>
       </div>
-      <div class="col-md-4">
+      <div class="col-md-5">
         <label class="form-label">Позиция меню</label>
-        <select v-model="newItem.menu_id" class="form-select">
+        <select v-model="form.menu_id" class="form-select">
           <option value="">Выберите позицию меню...</option>
-          <option v-for="m in menuItems" :key="m.id" :value="m.id">{{ menuLabel(m) }}</option>
+          <option v-for="m in menu" :key="m.id" :value="m.id">{{ menuTitle(m) }}</option>
         </select>
       </div>
       <div class="col-md-2">
         <label class="form-label">Кол-во</label>
-        <input v-model.number="newItem.qty" type="number" min="1" class="form-control" />
+        <input v-model.number="form.qty" type="number" min="1" class="form-control" />
       </div>
-      <div class="col-md-2">
-        <button type="submit" class="btn btn-primary w-100">Создать</button>
+      <div class="col-md-1 d-grid">
+        <button class="btn btn-primary" type="button" @click="onCreate">Создать</button>
       </div>
-    </form>
+    </div>
 
+    <!-- фильтры -->
     <div class="card mb-3">
       <div class="card-body">
         <div class="row g-2 align-items-center">
-          <div class="col-md-2"><input v-model="filters.id" type="text" class="form-control" placeholder="Фильтр по ID" /></div>
+          <div class="col-md-3"><input v-model="filters.id" type="text" class="form-control" placeholder="Фильтр по ID" /></div>
           <div class="col-md-3"><input v-model="filters.order" type="text" class="form-control" placeholder="Фильтр по заказу" /></div>
-          <div class="col-md-3"><input v-model="filters.menu" type="text" class="form-control" placeholder="Фильтр по позиции" /></div>
-          <div class="col-md-2"><input v-model="filters.qty" type="text" class="form-control" placeholder="Фильтр по кол-ву" /></div>
-          <div class="col-md-2"><button type="button" class="btn btn-outline-secondary w-100" @click="resetFilters">Сброс</button></div>
+          <div class="col-md-4"><input v-model="filters.menuText" type="text" class="form-control" placeholder="Фильтр по позиции" /></div>
+          <div class="col-md-1"><input v-model="filters.qty" type="text" class="form-control" placeholder="Кол-во" /></div>
+          <div class="col-md-1 d-grid"><button class="btn btn-outline-secondary" @click="resetFilters">Сброс</button></div>
+        </div>
+
+        <div class="mt-3 d-flex gap-2" v-if="canAdmin">
+          <button class="btn btn-success" type="button" @click="onExport('excel')">Экспорт в Excel</button>
+          <button class="btn btn-primary" type="button" @click="onExport('word')">Экспорт в Word</button>
         </div>
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
-
-    <div class="table-responsive">
-      <table class="table table-striped align-middle">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Заказ</th>
-            <th>Позиция меню</th>
-            <th>Кол-во</th>
-            <th>Действия</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="!filteredItems.length">
-            <td colspan="5" class="text-center text-muted">Позиции заказа пока не добавлены</td>
-          </tr>
-
-          <tr v-for="row in filteredItems" :key="row.id">
-            <td>{{ row.id }}</td>
-
-            <td v-if="!row.isEditing">{{ orderLabel(row.order) }}</td>
-            <td v-else style="max-width: 220px">
-              <select v-model="row.edits.order_id" class="form-select form-select-sm">
-                <option v-for="o in orders" :key="o.id" :value="o.id">{{ orderLabel(o) }}</option>
-              </select>
-            </td>
-
-            <td v-if="!row.isEditing">{{ menuLabel(row.menu) }}</td>
-            <td v-else style="max-width: 240px">
-              <select v-model="row.edits.menu_id" class="form-select form-select-sm">
-                <option v-for="m in menuItems" :key="m.id" :value="m.id">{{ menuLabel(m) }}</option>
-              </select>
-            </td>
-
-            <td v-if="!row.isEditing">{{ row.qty ?? row.quantity }}</td>
-            <td v-else style="max-width: 110px">
-              <input v-model.number="row.edits.qty" type="number" min="1" class="form-control form-control-sm" />
-            </td>
-
-            <td>
-              <template v-if="!row.isEditing && canAdmin">
-                <button class="btn btn-sm btn-outline-primary me-2" @click="startEditRow(row)">Редактировать</button>
-                <button class="btn btn-sm btn-danger" @click="handleDeleteRow(row)">Удалить</button>
-              </template>
-              <template v-else-if="row.isEditing && canAdmin">
-                <button class="btn btn-sm btn-success me-2" @click="saveEditRow(row)">Сохранить</button>
-                <button class="btn btn-sm btn-outline-secondary" @click="cancelEditRow(row)">Отмена</button>
-              </template>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- таблица -->
+    <div class="card">
+      <div class="card-body table-responsive">
+        <table class="table align-middle mb-0">
+          <thead>
+            <tr>
+              <th style="width: 90px;">ID</th>
+              <th style="width: 100px;">Заказ</th>
+              <th>Позиция меню</th>
+              <th style="width: 110px;">Кол-во</th>
+              <th style="width: 150px;" v-if="canAdmin">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="loading"><td colspan="5" class="text-center text-muted">Загрузка...</td></tr>
+            <tr v-for="it in filteredList" :key="it.id">
+              <td>{{ it.id }}</td>
+              <td>#{{ it.order?.id ?? it.order_id }}</td>
+              <td>{{ it.menu?.name ?? it.menu?.title ?? ('Позиция #' + (it.menu?.id ?? it.menu_id)) }}</td>
+              <td>
+                <template v-if="canAdmin">
+                  <input v-model.number="it.qty" type="number" min="1" class="form-control form-control-sm" />
+                </template>
+                <template v-else>{{ it.qty }}</template>
+              </td>
+              <td v-if="canAdmin">
+                <button class="btn btn-sm btn-success me-2" @click="onSave(it)">Сохранить</button>
+                <button class="btn btn-sm btn-danger" @click="onDelete(it)">Удалить</button>
+              </td>
+            </tr>
+            <tr v-if="!loading && !filteredList.length"><td :colspan="canAdmin?5:4" class="text-center text-muted">Позиции заказа пока не добавлены</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </template>
