@@ -1,112 +1,76 @@
-<script setup>
-import { ref } from "vue";
-import { useRouter } from "vue-router";
-import { useUserStore } from "@/stores/user";
-
-const router = useRouter();
-const user = useUserStore();
-
-const username = ref("");
-const password = ref("");
-const submitting = ref(false);
-const error = ref("");
-
-async function onSubmit(e) {
-  e.preventDefault();
-  submitting.value = true;
-  error.value = "";
-  const ok = await user.login({
-    username: username.value.trim(),
-    password: password.value,
-  });
-  submitting.value = false;
-  if (ok) router.replace("/menu");
-  else error.value = user.error || "Ошибка входа";
-}
-</script>
-
+<!-- client/src/components/auth/LoginPage.vue -->
 <template>
-  <div class="auth-screen">
-    <div class="auth-card">
-      <div class="auth-card-body">
-        
-        <div class="form-wrap">
-          <h1 class="h2 fw-bold text-center mb-2">Вход</h1>
-          <p class="text-center text-muted mb-4">Введите логин и пароль</p>
+  <div class="container-fluid min-vh-100 d-flex align-items-center">
+    <div class="container">
+      <div class="row justify-content-center">
+        <div class="col-12 col-sm-10 col-md-7 col-lg-5 col-xl-4">
+          <div class="card shadow-sm">
+            <div class="card-body p-4">
+              <h1 class="h2 text-center mb-2">Вход</h1>
+              <p class="text-muted text-center mb-4">Введите логин и пароль</p>
 
-          <form @submit="onSubmit" class="vstack gap-3">
-            <div>
-              <label class="form-label">Логин</label>
-              <input
-                v-model="username"
-                type="text"
-                class="form-control form-control-lg"
-                autocomplete="username"
-              />
+              <div class="mx-auto" style="max-width: 260px;">
+                <div v-if="error" class="alert alert-danger">{{ error }}</div>
+
+                <form @submit.prevent="onSubmit" autocomplete="on">
+                  <div class="mb-3">
+                    <label class="form-label">Логин</label>
+                    <input
+                      v-model.trim="username"
+                      type="text"
+                      class="form-control w-100"
+                      required
+                      autofocus
+                    />
+                  </div>
+
+                  <div class="mb-4">
+                    <label class="form-label">Пароль</label>
+                    <input
+                      v-model="password"
+                      type="password"
+                      class="form-control w-100"
+                      required
+                    />
+                  </div>
+
+                  <button class="btn btn-primary w-100" type="submit" :disabled="loading">
+                    {{ loading ? "Входим..." : "Войти" }}
+                  </button>
+                </form>
+              </div>
             </div>
-
-            <div>
-              <label class="form-label">Пароль</label>
-              <input
-                v-model="password"
-                type="password"
-                class="form-control form-control-lg"
-                autocomplete="current-password"
-              />
-            </div>
-
-            <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
-
-            <button class="btn btn-primary btn-lg w-100" :disabled="submitting">
-              {{ submitting ? "Входим..." : "Войти" }}
-            </button>
-          </form>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </template>
 
-<style scoped>
-/* Экран */
-.auth-screen {
-  min-height: calc(100dvh - 80px);
-  display: grid;
-  place-items: center;
-  padding: clamp(16px, 4vw, 40px);
-}
+<script setup>
+import { ref } from "vue";
+import { useRouter } from "vue-router";
+import { useUserStore } from "@/stores/user";
 
-/* Карточка */
-.auth-card {
-  width: min(32vw, 980px);
-  border-radius: 20px;
-  background: #fff;
-  box-shadow:
-    0 30px 60px rgba(0,0,0,.1),
-    0 1px 0 rgba(0,0,0,.04) inset;
-}
+const router = useRouter();
+const store = useUserStore();
 
-.auth-card-body {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: clamp(24px, 4vw, 48px);
-}
+const username = ref("");
+const password = ref("");
+const loading  = ref(false);
+const error    = ref("");
 
-
-.form-wrap {
-  max-width: 220px;    
-  width: 100%;
-  margin: 0 auto;     
-  text-align: left;
+async function onSubmit() {
+  error.value = "";
+  loading.value = true;
+  try {
+    await store.login(username.value, password.value);
+    // После входа — просто на /menu (и у админа, и у пользователя)
+    await router.replace("/menu");
+  } catch {
+    error.value = "Не удалось войти. Проверьте логин и пароль.";
+  } finally {
+    loading.value = false;
+  }
 }
-
-/* Сглаживание */
-:deep(.form-control-lg) {
-  min-height: 48px;
-  border-radius: 12px;
-}
-:deep(.btn-lg) {
-  border-radius: 12px;
-}
-</style>
+</script>

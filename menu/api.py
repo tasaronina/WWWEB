@@ -1,423 +1,247 @@
-from datetime import datetime
-from decimal import Decimal
-import io
-
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, login, logout
 from django.db.models import (
-    Q, F, Sum, Count, Value as V, DecimalField, ExpressionWrapper, Avg, Max, Min
+    F, Sum, Avg, Max, Min, Count, ExpressionWrapper, DecimalField
 )
-from django.db.models.functions import Coalesce
-from django.http import HttpResponse
+from django.middleware.csrf import get_token
+from django.shortcuts import get_object_or_404
 
-from rest_framework import viewsets
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
-from openpyxl import Workbook
-from openpyxl.utils import get_column_letter
-from docx import Document
+from .models import Category, Menu, Customer, Order, OrderItem
+from .serializers import (
+    CategorySerializer, MenuSerializer, CustomerSerializer,
+    OrderSerializer, OrderItemSerializer
+)
 
-from .models import Customer, Order, OrderItem, Menu as MenuItem
-from .serializers import CustomerSerializer, OrderSerializer, OrderItemSerializer
-from .permissions import IsAdminOrReadOnly
+# =========================
+# CSRF & AUTH
+# =========================
 
-User = get_user_model()
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def csrf_view(request):
+    """Отдаёт и устанавливает csrftoken-cookie."""
+    return Response({"csrfToken": get_token(request)})
 
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def login_view(request):
+    """Логин по SessionAuth (username/password)."""
+    username = request.data.get("username") or request.data.get("login") or ""
+    password = request.data.get("password") or ""
+    user = authenticate(request, username=username, password=password)
+    if not user:
+        return Response({"detail": "Неверные логин/пароль"}, status=400)
+    login(request, user)
+    return Response({
+        "id": user.id,
+        "username": user.get_username(),
+        "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
+    })
 
+@api_view(["POST"])
+def logout_view(request):
+    """Выход (сброс сессии)."""
+    logout(request)
+    return Response({"ok": True})
 
-def _parse_date(s):
-    try:
-        return datetime.strptime(s, "%Y-%m-%d").date()
-    except Exception:
-        return None
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def me_view(request):
+    """Информация о текущем пользователе (или пусто, если гость)."""
+    if not request.user.is_authenticated:
+        return Response({}, status=200)
+    u = request.user
+    return Response({
+        "id": u.id,
+        "username": u.get_username(),
+        "is_staff": u.is_staff,
+        "is_superuser": u.is_superuser,
+    })
 
+# =========================
+# Permissions
+# =========================
 
-def _iter_order_items(order):
-    for attr in ("items", "order_items", "orderitem_set"):
-        if hasattr(order, attr):
-            qs = getattr(order, attr)
-            try:
-                return qs.all()
-            except Exception:
-                return qs
-    return []
+class IsAdminOrReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return True
+        return bool(request.user and request.user.is_authenticated and
+                    (request.user.is_staff or request.user.is_superuser))
 
+# =========================
+# Helpers
+# =========================
 
-def _get_item_title(item):
-    for attr in ("title", "name", "label", "product_name"):
-        if hasattr(item, attr):
-            val = getattr(item, attr)
-            if callable(val):
-                try:
-                    return val()
-                except Exception:
-                    continue
-            return val
-    for rel in ("menu", "menu_item", "item", "product", "dish"):
-        if hasattr(item, rel):
-            obj = getattr(item, rel)
-            for attr in ("title", "name", "label"):
-                if hasattr(obj, attr):
-                    return getattr(obj, attr)
-    return "—"
+def annotate_total(qs):
+    """total = SUM(items.qty * items.menu.price) как Decimal."""
+    money = ExpressionWrapper(
+        F("items__qty") * F("items__menu__price"),
+        output_field=DecimalField(max_digits=12, decimal_places=2),
+    )
+    return qs.annotate(total=Sum(money))
 
+# =========================
+# ViewSets
+# =========================
 
-def _get_unit_price(item) -> Decimal:
-    for attr in ("unit_price", "price", "cost"):
-        if hasattr(item, attr):
-            try:
-                return Decimal(getattr(item, attr) or 0)
-            except Exception:
-                pass
-    if hasattr(item, "menu") and getattr(item, "menu") is not None:
-        try:
-            return Decimal(getattr(item.menu, "price", 0) or 0)
-        except Exception:
-            return Decimal("0")
-    return Decimal("0")
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all().order_by("id")
+    serializer_class = CategorySerializer
+    permission_classes = [IsAdminOrReadOnly]
 
-
-def _get_customer_name(order):
-    c = getattr(order, "customer", None)
-    if not c:
-        return "—"
-    for attr in ("full_name", "fio", "name"):
-        if hasattr(c, attr):
-            return getattr(c, attr)
-    first = getattr(c, "first_name", "")
-    last = getattr(c, "last_name", "")
-    mid = getattr(c, "middle_name", "")
-    t = " ".join(x for x in (last, first, mid) if x)
-    return t or "—"
-
-
-STATUS_LABELS = {
-    "NEW": "Новый",
-    "IN_PROGRESS": "Готовится",
-    "DONE": "Готов",
-    "PAID": "Оплачен",
-    "CANCELLED": "Отменён",
-    "new": "Новый",
-    "in_progress": "Готовится",
-    "done": "Готов",
-    "paid": "Оплачен",
-    "canceled": "Отменён",
-}
-
-
-
-
-class BaseExportMixin:
-    ROW_LIMIT = 50000
-
-    def _excel_autowidth(self, ws):
-        for column_cells in ws.columns:
-            length = 0
-            col = column_cells[0].column if hasattr(column_cells[0], "column") else 1
-            for cell in column_cells:
-                try:
-                    length = max(length, len(str(cell.value)))
-                except Exception:
-                    pass
-            ws.column_dimensions[get_column_letter(col)].width = min(length + 2, 60)
-
-    def _make_excel(self, sheets):
-        wb = Workbook()
-        ws = wb.active
-        if sheets:
-            title, headers, rows = sheets[0]
-            ws.title = title[:31] or "Sheet1"
-            if headers:
-                ws.append(headers)
-            for r in rows[: self.ROW_LIMIT]:
-                ws.append(r)
-            self._excel_autowidth(ws)
-
-        for title, headers, rows in sheets[1:]:
-            ws = wb.create_sheet(title=title[:31] or "Sheet")
-            if headers:
-                ws.append(headers)
-            for r in rows[: self.ROW_LIMIT]:
-                ws.append(r)
-            self._excel_autowidth(ws)
-
-        stream = io.BytesIO()
-        wb.save(stream)
-        stream.seek(0)
-        return stream
-
-    def _make_word(self, title, blocks):
-        doc = Document()
-        doc.add_heading(title, 0)
-        for blk in blocks:
-            if blk.get("type") == "text":
-                doc.add_paragraph(blk.get("text", ""))
-            elif blk.get("type") == "table":
-                headers = blk.get("headers") or []
-                rows = blk.get("rows") or []
-                table = doc.add_table(rows=1, cols=len(headers))
-                hdr = table.rows[0].cells
-                for i, h in enumerate(headers):
-                    hdr[i].text = str(h)
-                for row in rows[: self.ROW_LIMIT]:
-                    cells = table.add_row().cells
-                    for j, val in enumerate(row):
-                        cells[j].text = "" if val is None else str(val)
-        stream = io.BytesIO()
-        doc.save(stream)
-        stream.seek(0)
-        return stream
-
-    def _download(self, stream, filename, content_type):
-        resp = HttpResponse(stream, content_type=content_type)
-        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return resp
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        data = self.get_queryset().aggregate(
+            count=Count("id"),
+            avg=Avg("id"),
+            max=Max("id"),
+            min=Min("id"),
+        )
+        return Response({
+            "count": data["count"] or 0,
+            "avg": float(data["avg"] or 0),
+            "max": data["max"] or 0,
+            "min": data["min"] or 0,
+        })
 
 
-# ------------------------------ Orders ------------------------------
+class MenuViewSet(viewsets.ModelViewSet):
+    queryset = Menu.objects.select_related("group").all().order_by("id")
+    serializer_class = MenuSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    parser_classes = (MultiPartParser, FormParser, JSONParser)  # для фото
 
-class OrdersViewSet(viewsets.ModelViewSet, BaseExportMixin):
-    """
-    USER: только чтение; ADMIN: полный CRUD.
-    Массовый экспорт — только ADMIN.
-    """
-    queryset = Order.objects.all().select_related("customer")
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        data = self.get_queryset().aggregate(
+            count=Count("id"),
+            avg=Avg("price"),
+            max=Max("price"),
+            min=Min("price"),
+        )
+        return Response({
+            "count": data["count"] or 0,
+            "avg": float(data["avg"] or 0),
+            "max": float(data["max"] or 0),
+            "min": float(data["min"] or 0),
+        })
+
+
+class CustomerViewSet(viewsets.ModelViewSet):
+    queryset = Customer.objects.all().order_by("id")
+    serializer_class = CustomerSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    parser_classes = (MultiPartParser, FormParser, JSONParser)  # для фото
+
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        data = self.get_queryset().aggregate(
+            count=Count("id"),
+            avg=Avg("id"),
+            max=Max("id"),
+            min=Min("id"),
+        )
+        return Response({
+            "count": data["count"] or 0,
+            "avg": float(data["avg"] or 0),
+            "max": data["max"] or 0,
+            "min": data["min"] or 0,
+        })
+
+
+class OrderViewSet(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-
-        # фильтры из query params
-        p = self.request.query_params
-        date_from = _parse_date(p.get("date_from"))
-        date_to = _parse_date(p.get("date_to"))
-        status = p.get("status")
-        customer_id = p.get("customer_id")
-        search = p.get("search")
-        sort = p.get("sort")
-
-        if date_from:
-            qs = qs.filter(created_at__date__gte=date_from)
-        if date_to:
-            qs = qs.filter(created_at__date__lte=date_to)
-        if status:
-            qs = qs.filter(status=status)
-        if customer_id:
-            qs = qs.filter(customer_id=customer_id)
-
-        if search:
-            cond = Q(id__icontains=search)
-            cond |= Q(customer__name__icontains=search) | Q(customer__fio__icontains=search) | Q(customer__full_name__icontains=search)
-            qs = qs.filter(cond)
-
-        qs = qs.order_by(sort) if sort else qs.order_by("-id")
-
-        money = ExpressionWrapper(
-            F("items__qty") * F("items__menu__price"),
-            output_field=DecimalField(max_digits=14, decimal_places=2),
-        )
-        qs = qs.annotate(
-            items_count=Coalesce(Count("items"), V(0)),
-            total_amount=Coalesce(
-                Sum(money),
-                V(0, output_field=DecimalField(max_digits=14, decimal_places=2)),
-            ),
-        )
-        return qs
+        qs = Order.objects.select_related("customer", "user") \
+                          .prefetch_related("items", "items__menu")
+        user = self.request.user
+        if not (user.is_staff or user.is_superuser):
+            qs = qs.filter(user=user)
+        return annotate_total(qs).order_by("-id")
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
-        qs = self.get_queryset()
-        data = qs.aggregate(
+        data = self.get_queryset().aggregate(
             count=Count("id"),
             avg=Avg("id"),
             max=Max("id"),
             min=Min("id"),
         )
-        return Response(data)
+        return Response({
+            "count": data["count"] or 0,
+            "avg": float(data["avg"] or 0),
+            "max": data["max"] or 0,
+            "min": data["min"] or 0,
+        })
 
-    @action(detail=False, methods=["get"], permission_classes=[IsAdminUser])
-    def export(self, request):
-        qs = self.get_queryset()
+    @action(detail=False, methods=["post"], url_path="add-to-cart")
+    def add_to_cart(self, request):
+        """Добавление позиции в корзину текущего пользователя (status=NEW)."""
+        if not request.user.is_authenticated:
+            return Response({"detail": "Auth required"}, status=403)
 
-        file_type = (request.query_params.get("type") or "excel").lower()
-        include_items = (request.query_params.get("include_items") or "false").lower() == "true"
-        include_summary = (request.query_params.get("include_summary") or "true").lower() != "false"
+        menu_id = request.data.get("menu_id")
+        qty = int(request.data.get("qty", 1) or 1)
+        if qty < 1:
+            qty = 1
 
-        orders_headers = ["ID", "Клиент", "Статус", "Создан", "Позиций", "Сумма, ₽"]
-        orders_rows = []
-        for o in qs:
-            created = getattr(o, "created_at", None)
-            created_str = created.strftime("%Y-%m-%d %H:%M") if created else ""
-            items_count = getattr(o, "items_count", None)
-            total_amount = getattr(o, "total_amount", None)
-            if items_count is None or total_amount is None:
-                its = list(_iter_order_items(o))
-                items_count = len(its)
-                total_amount = sum(Decimal(getattr(i, "qty", 0)) * _get_unit_price(i) for i in its)
+        menu_obj = get_object_or_404(Menu, id=menu_id)
 
-            orders_rows.append([
-                o.id,
-                _get_customer_name(o),
-                STATUS_LABELS.get(getattr(o, "status", ""), getattr(o, "status", "") or "—"),
-                created_str,
-                int(items_count),
-                f"{Decimal(total_amount):.2f}",
-            ])
+        # Подвязываем клиента (если нет — создаём базового по имени пользователя)
+        name = (request.user.get_full_name() or request.user.get_username() or "Покупатель").strip()
+        customer, _ = Customer.objects.get_or_create(name=name)
 
-        items_headers = ["ID", "OrderID", "Блюдо", "Кол-во", "Цена, ₽", "Итого, ₽"]
-        items_rows = []
-        if include_items:
-            qs = qs.prefetch_related("items", "items__menu")
-            for o in qs:
-                for it in _iter_order_items(o):
-                    qty = getattr(it, "qty", 0) or 0
-                    up = _get_unit_price(it)
-                    items_rows.append([
-                        getattr(it, "id", None),
-                        o.id,
-                        _get_item_title(it),
-                        qty,
-                        f"{up:.2f}",
-                        f"{(Decimal(qty) * up):.2f}",
-                    ])
-
-        summary_headers = ["Показатель", "Значение"]
-        summary_rows = []
-        if include_summary:
-            cnt = len(orders_rows)
-            total = sum(Decimal(r[5].replace(",", ".").replace(" ", "")) for r in orders_rows) if orders_rows else Decimal("0")
-            avg = total / cnt if cnt else Decimal("0")
-            summary_rows.extend([
-                ["Количество заказов", cnt],
-                ["Суммарная выручка, ₽", f"{total:.2f}"],
-                ["Средний чек, ₽", f"{avg:.2f}"],
-            ])
-
-        now = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        fname = f"orders_{now}"
-
-        if file_type == "word":
-            blocks = [
-                {"type": "text", "text": "Экспорт заказов (с учётом фильтров)"},
-                {"type": "table", "headers": orders_headers, "rows": orders_rows},
-            ]
-            if include_items:
-                blocks.append({"type": "table", "headers": items_headers, "rows": items_rows})
-            if include_summary:
-                blocks.append({"type": "table", "headers": summary_headers, "rows": summary_rows})
-            stream = self._make_word("Orders Export", blocks)
-            return self._download(
-                stream,
-                f"{fname}.docx",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
-
-        sheets = [("Orders", orders_headers, orders_rows)]
-        if include_items:
-            sheets.append(("OrderItems", items_headers, items_rows))
-        if include_summary:
-            sheets.append(("Summary", summary_headers, summary_rows))
-        stream = self._make_excel(sheets)
-        return self._download(
-            stream,
-            f"{fname}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        # Берём/создаём незакрытый заказ пользователя
+        order, created = Order.objects.get_or_create(
+            user=request.user, status="NEW", defaults={"customer": customer}
         )
+        if not order.customer_id:
+            order.customer = customer
+            order.save(update_fields=["customer"])
+
+        # Добавляем/увеличиваем позицию
+        item, created_item = OrderItem.objects.get_or_create(
+            order=order, menu=menu_obj, defaults={"qty": qty}
+        )
+        if not created_item:
+            item.qty = item.qty + qty
+            item.save(update_fields=["qty"])
+
+        return Response({"ok": True, "item": OrderItemSerializer(item).data}, status=200)
 
 
-
-
-class OrderItemsViewSet(viewsets.ModelViewSet, BaseExportMixin):
-    """
-    USER: только чтение; ADMIN: полный CRUD.
-    Экспорт — только ADMIN.
-    """
-    queryset = OrderItem.objects.all().select_related("order", "menu")
+class OrderItemViewSet(viewsets.ModelViewSet):
+    queryset = OrderItem.objects.select_related("order", "menu").all().order_by("id")
     serializer_class = OrderItemSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        user = self.request.user
         qs = super().get_queryset()
-        p = self.request.query_params
-        order_id = p.get("order_id")
-        date_from = _parse_date(p.get("date_from"))
-        date_to = _parse_date(p.get("date_to"))
-        search = p.get("search")
-        sort = p.get("sort")
-
-        if order_id:
-            qs = qs.filter(order_id=order_id)
-        if date_from:
-            qs = qs.filter(order__created_at__date__gte=date_from)
-        if date_to:
-            qs = qs.filter(order__created_at__date__lte=date_to)
-
-        if search:
-            cond = Q(id__icontains=search) | Q(order__id__icontains=search)
-            qs = qs.filter(cond)
-
-        qs = qs.order_by(sort) if sort else qs.order_by("-id")
-
-        qs = qs.annotate(
-            line_total=ExpressionWrapper(
-                F("qty") * F("menu__price"),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            )
-        )
-        return qs
+        if not (user.is_staff or user.is_superuser):
+            qs = qs.filter(order__user=user)
+        return qs.order_by("-id")
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
-        qs = self.get_queryset()
-        data = qs.aggregate(
+        data = self.get_queryset().aggregate(
             count=Count("id"),
             avg=Avg("id"),
             max=Max("id"),
             min=Min("id"),
         )
-        return Response(data)
-
-    @action(detail=False, methods=["get"], permission_classes=[IsAdminUser])
-    def export(self, request):
-        qs = self.get_queryset()
-        file_type = (request.query_params.get("type") or "excel").lower()
-
-        headers = ["ID", "OrderID", "Блюдо", "Кол-во", "Цена, ₽", "Итого, ₽"]
-        rows = []
-        for it in qs:
-            qty = getattr(it, "qty", 0) or 0
-            up = _get_unit_price(it)
-            line = getattr(it, "line_total", None)
-            if line is None:
-                line = Decimal(qty) * up
-            rows.append([
-                getattr(it, "id", None),
-                getattr(it, "order_id", None),
-                _get_item_title(it),
-                qty,
-                f"{up:.2f}",
-                f"{Decimal(line):.2f}",
-            ])
-
-        now = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        fname = f"order_items_{now}"
-
-        if file_type == "word":
-            stream = self._make_word("Order Items Export", [
-                {"type": "table", "headers": headers, "rows": rows}
-            ])
-            return self._download(
-                stream,
-                f"{fname}.docx",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
-
-        stream = self._make_excel([("OrderItems", headers, rows)])
-        return self._download(
-            stream,
-            f"{fname}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        return Response({
+            "count": data["count"] or 0,
+            "avg": float(data["avg"] or 0),
+            "max": data["max"] or 0,
+            "min": data["min"] or 0,
+        })

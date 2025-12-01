@@ -1,36 +1,24 @@
+// client/src/stores/user.js
 import { defineStore } from "pinia";
-import axios from "axios";
-
-axios.defaults.withCredentials = true;
-
-async function ensureCsrf() {
-  try { await axios.get("/api/csrf/"); } catch {}
-}
+import { getMe, doLogin, doLogout } from "@/api";
+import router from "@/router";
 
 export const useUserStore = defineStore("user", {
   state: () => ({
-    user: null,
-    ready: false,
-    error: "",
+    user: null,           // {id, username, is_staff, is_superuser}
+    ready: false,         // инициализация завершена
   }),
-
   getters: {
-    isAuthenticated: (s) => !!s.user,
-    username: (s) =>
-      s.user?.username ||
-      s.user?.name ||
-      s.user?.email ||
-      "",
+    isAuth: (s) => !!s.user,
+    username: (s) => (s.user ? s.user.username : ""),
+    isAdmin: (s) => !!(s.user && (s.user.is_staff || s.user.is_superuser)),
   },
-
   actions: {
-    async init() {
-      if (this.ready) return;
-      this.error = "";
+    async restore() {
       try {
-        await ensureCsrf();
-        const { data } = await axios.get("/api/auth/me/");
-        this.user = data || null;
+        const me = await getMe();
+        // Когда не залогинен — сервер отдаёт {} или is_authenticated=false
+        this.user = me && me.username ? me : null;
       } catch {
         this.user = null;
       } finally {
@@ -38,30 +26,21 @@ export const useUserStore = defineStore("user", {
       }
     },
 
-    async login({ username, password }) {
-      this.error = "";
-      try {
-        await ensureCsrf();
-        await axios.post("/api/auth/login/", { username, password });
-        const { data } = await axios.get("/api/auth/me/");
-        this.user = data || null;
-        this.ready = true;
-        return true;
-      } catch (e) {
-        this.user = null;
-        this.ready = true;
-        this.error = "Неверные логин или пароль";
-        return false;
-      }
+    async login(username, password) {
+      const me = await doLogin(username, password);
+      // сервер возвращает id/username/is_staff/is_superuser
+      this.user = me && me.username ? me : null;
+      if (!this.user) throw new Error("bad credentials");
     },
 
     async logout() {
-      try {
-        await ensureCsrf();
-        await axios.post("/api/auth/logout/");
-      } catch {}
-      this.user = null;
-      this.ready = true;
+      try { await doLogout(); } finally {
+        this.user = null;
+        // жёстко отправляем на логин, чтобы не оставаться на /menu
+        if (router.currentRoute.value.path !== "/login") {
+          await router.replace("/login");
+        }
+      }
     },
   },
 });

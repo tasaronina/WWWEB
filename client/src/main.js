@@ -1,14 +1,14 @@
+// client/src/main.js
 import { createApp } from "vue";
 import { createPinia } from "pinia";
 import App from "./App.vue";
 import router from "./router";
-import axios from "axios";
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
+import "@/styles/admin.css";
 
-axios.defaults.withCredentials = true;
-axios.defaults.xsrfCookieName = "csrftoken";
-axios.defaults.xsrfHeaderName = "X-CSRFToken";
-
-createApp(App).use(createPinia()).use(router).mount("#app");
+const app = createApp(App);
+app.use(createPinia());
+app.use(router);
+app.mount("#app");
