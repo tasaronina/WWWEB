@@ -1,7 +1,26 @@
 <script setup>
 import axios from "axios";
 import { ref, computed, onBeforeMount } from "vue";
+import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "@/styles/admin.css";
+
+axios.defaults.withCredentials = true
+
+const canAdmin = ref(false)
+async function detectAdmin(){
+  if (typeof window !== "undefined" && (window.IS_ADMIN===true||window.__CAN_ADMIN__===true||window.vCanAdmin===true)) return true
+  try{ if(localStorage.getItem("is_admin")==="1") return true }catch{}
+  const eps=["/api/me/","/api/auth/me/","/api/users/me/","/api/user/","/api/whoami/"]
+  for(const ep of eps){
+    try{
+      const {data}=await axios.get(ep)
+      if(!data) continue
+      const role=(data.role||"").toString().toLowerCase()
+      if(data.is_superuser||data.is_staff||data.is_admin||["admin","staff","manager","superuser"].includes(role)) return true
+    }catch{}
+  }
+  return false
+}
 
 const items = ref([]);
 const stats = ref(null);
@@ -55,9 +74,7 @@ async function fetchStats() {
 
 function customerAddPictureChange(e) {
   if (!e.target.files.length) return;
-  if (newItem.value.picturePreview) {
-    URL.revokeObjectURL(newItem.value.picturePreview);
-  }
+  if (newItem.value.picturePreview) URL.revokeObjectURL(newItem.value.picturePreview);
   newItem.value.pictureFile = e.target.files[0];
   newItem.value.picturePreview = URL.createObjectURL(newItem.value.pictureFile);
 }
@@ -68,52 +85,52 @@ function onEditPictureChange(e) {
   itemToEdit.value.pictureUrl = URL.createObjectURL(editPictureFile.value);
 }
 
+function showModal(id){
+  const el = document.getElementById(id)
+  if (el && window.bootstrap) window.bootstrap.Modal.getOrCreateInstance(el).show()
+}
+
 async function onItemAdd() {
+  if (!canAdmin.value) return;
   if (!newItem.value.name.trim()) return;
   const fd = new FormData();
   fd.append("name", newItem.value.name.trim());
-  if (newItem.value.pictureFile) {
-    fd.append("picture", newItem.value.pictureFile);
-  }
+  if (newItem.value.pictureFile) fd.append("picture", newItem.value.pictureFile);
   await axios.post("/api/customers/", fd, { headers: { "Content-Type": "multipart/form-data" } });
-  if (newItem.value.picturePreview) {
-    URL.revokeObjectURL(newItem.value.picturePreview);
-  }
+  if (newItem.value.picturePreview) URL.revokeObjectURL(newItem.value.picturePreview);
   newItem.value = { name: "", pictureFile: null, picturePreview: null };
   await Promise.all([fetchItems(), fetchStats()]);
 }
 
 function onItemEditClick(it) {
+  if (!canAdmin.value) return;
   itemToEdit.value = { id: it.id, name: it.name, pictureUrl: it.pictureUrl || null };
   editPictureFile.value = null;
-  new bootstrap.Modal(document.getElementById("editCustomerModal")).show();
+  showModal("editCustomerModal")
 }
 
 async function onItemUpdate() {
+  if (!canAdmin.value) return;
   if (!itemToEdit.value.name.trim()) return;
   const fd = new FormData();
   fd.append("name", itemToEdit.value.name.trim());
-  if (editPictureFile.value) {
-    fd.append("picture", editPictureFile.value);
-  }
-  await axios.put(`/api/customers/${itemToEdit.value.id}/`, fd, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+  if (editPictureFile.value) fd.append("picture", editPictureFile.value);
+  await axios.put(`/api/customers/${itemToEdit.value.id}/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
   editPictureFile.value = null;
   await Promise.all([fetchItems(), fetchStats()]);
 }
 
 async function onItemDelete(it) {
+  if (!canAdmin.value) return;
   if (!confirm(`Удалить клиента "${it.name}"?`)) return;
   await axios.delete(`/api/customers/${it.id}/`);
   await Promise.all([fetchItems(), fetchStats()]);
 }
 
-function resetFilters() {
-  filters.value = { id: "", name: "" };
-}
+function resetFilters() { filters.value = { id: "", name: "" } }
 
 onBeforeMount(async () => {
+  canAdmin.value = await detectAdmin()
   await Promise.all([fetchItems(), fetchStats()]);
 });
 </script>
@@ -124,7 +141,7 @@ onBeforeMount(async () => {
 
     <div v-if="error" class="alert alert-danger alert-inline">Ошибка: {{ error }}</div>
 
-    <div class="card mb-4">
+    <div class="card mb-4" v-if="canAdmin">
       <div class="card-body">
         <h5 class="card-title mb-3">Добавить клиента</h5>
         <form class="row g-3 align-items-end" @submit.prevent="onItemAdd">
@@ -156,7 +173,6 @@ onBeforeMount(async () => {
       </div>
     </div>
 
-    <!-- Фильтры как на “Добавить заказ” -->
     <div class="card mb-3">
       <div class="card-body">
         <div class="row g-2 align-items-center">
@@ -185,7 +201,7 @@ onBeforeMount(async () => {
                 <div class="text-muted small">ID: {{ it.id }}</div>
               </div>
             </div>
-            <div class="btn-group">
+            <div class="btn-group" v-if="canAdmin">
               <button class="btn btn-sm btn-outline-primary" type="button" @click="onItemEditClick(it)">Редактировать</button>
               <button class="btn btn-sm btn-outline-danger" type="button" @click="onItemDelete(it)">Удалить</button>
             </div>
@@ -195,7 +211,7 @@ onBeforeMount(async () => {
       </div>
     </div>
 
-    <div id="editCustomerModal" class="modal fade" tabindex="-1" aria-hidden="true">
+    <div id="editCustomerModal" class="modal fade" tabindex="-1" aria-hidden="true" v-if="canAdmin">
       <div class="modal-dialog">
         <div class="modal-content">
           <div class="modal-header">

@@ -1,44 +1,47 @@
 <script setup>
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import { computed, onBeforeMount } from "vue";
+import { useUserStore } from "@/stores/user";
+import "@/styles/admin.css";
+
+const route = useRoute();
+const router = useRouter();
+const user = useUserStore();
+
+onBeforeMount(() => user.init());
+
+const showLogin = computed(() => user.ready && !user.isAuthenticated && route.path !== "/login");
+const showLogout = computed(() => user.ready && user.isAuthenticated && route.path !== "/login");
+const showUsername = computed(() => user.ready && user.isAuthenticated);
+
+async function doLogout() {
+  await user.logout();
+  if (route.path !== "/login") router.replace("/login");
+}
 </script>
 
 <template>
-  <div style="padding:16px">
-    <nav class="navbar navbar-expand-lg navbar-light bg-light" style="padding:8px 16px;">
-      <div class="container-fluid">
-        <div class="navbar-nav" style="display:flex; gap:12px;">
-          <router-link class="nav-link" active-class="active" to="/categories">Категории</router-link>
-          <router-link class="nav-link" active-class="active" to="/menu">Меню</router-link>
-          <router-link class="nav-link" active-class="active" to="/customers">Клиенты</router-link>
-          <router-link class="nav-link" active-class="active" to="/orders">Заказы</router-link>
-          <router-link class="nav-link" active-class="active" to="/order-items">Позиции заказа</router-link>
-        </div>
-
-        <ul class="navbar-nav ms-auto">
-          <li class="nav-item dropdown">
-            <a
-              class="nav-link dropdown-toggle"
-              href="#"
-              role="button"
-              data-bs-toggle="dropdown"
-              aria-expanded="false"
-            >
-              Пользователь
-            </a>
-            <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="/admin/">Админка</a></li>
-            </ul>
-          </li>
-        </ul>
+  <nav class="navbar bg-white border-bottom sticky-top">
+    <div class="container-fluid px-4 py-2">
+      <div class="d-flex gap-4">
+        <RouterLink class="nav-link" to="/categories">Категории</RouterLink>
+        <RouterLink class="nav-link" to="/menu">Меню</RouterLink>
+        <RouterLink class="nav-link" to="/customers">Клиенты</RouterLink>
+        <RouterLink class="nav-link" to="/orders">Заказы</RouterLink>
+        <RouterLink class="nav-link" to="/order-items">Позиции заказа</RouterLink>
       </div>
-    </nav>
 
-    <router-view />
-  </div>
+      <div class="d-flex align-items-center gap-3">
+        <span v-if="showUsername" class="badge rounded-pill text-bg-secondary">
+          {{ user.username }}
+        </span>
+        <button v-if="showLogout" class="btn btn-outline-danger btn-sm" @click="doLogout">Выйти</button>
+        <RouterLink v-if="showLogin" to="/login" class="btn btn-outline-primary btn-sm">Войти</RouterLink>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <RouterView />
+  </main>
 </template>
-
-<style>
-.navbar-nav .nav-link.active {
-  font-weight: bold;
-  color: #0d6efd !important;
-}
-</style>

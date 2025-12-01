@@ -1,4 +1,4 @@
-# menu/tests.py
+
 from django.test import TestCase
 from rest_framework.test import APIClient
 from model_bakery import baker
@@ -17,7 +17,7 @@ class CategoryCRUDTests(TestCase):
         self.assertEqual(Category.objects.count(), 1)
         self.assertEqual(Category.objects.first().name, "Десерты")
 
-    # READ (list + retrieve)
+    # READ 
     def test_category_list_and_retrieve(self):
         cats = baker.make(Category, _quantity=3)
         r = self.client.get("/api/categories/")
@@ -29,7 +29,7 @@ class CategoryCRUDTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["id"], cats[1].id)
 
-    # UPDATE (PUT целиком)
+    # UPDATE 
     def test_category_update(self):
         cat = baker.make(Category, name="Старое")
         r = self.client.put(
@@ -52,7 +52,7 @@ class MenuCRUDTests(TestCase):
         self.client = APIClient()
         self.cat = baker.make(Category, name="Горячие напитки")
 
-    # CREATE (обрати внимание: пишем group_id, т.к. group read_only)
+    # CREATE 
     def test_menu_create(self):
         r = self.client.post(
             "/api/menu/", {"name": "Эспрессо", "group_id": self.cat.id}, format="json"
@@ -74,7 +74,7 @@ class MenuCRUDTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["id"], items[0].id)
 
-    # UPDATE (PUT требует полный набор полей → name + group_id)
+    # UPDATE 
     def test_menu_update(self):
         item = baker.make(Menu, group=self.cat, name="Старое имя")
         r = self.client.put(
@@ -89,7 +89,7 @@ class MenuCRUDTests(TestCase):
 
     # DELETE
     def test_menu_delete(self):
-        # создадим 1 «Латте» и удалим именно его
+       
         latte = baker.make(Menu, name="Латте", group=self.cat)
         _other = baker.make(Menu, group=self.cat, _quantity=2)
 
@@ -113,7 +113,7 @@ class CustomerCRUDTests(TestCase):
         self.assertEqual(r.status_code, 201)
         cid = r.json()["id"]
 
-        # READ (retrieve)
+        # READ 
         r = self.client.get(f"/api/customers/{cid}/")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["name"], "Алия")
@@ -187,7 +187,7 @@ class OrderItemCRUDTests(TestCase):
         self.customer = baker.make(Customer)
         self.order = baker.make(Order, customer=self.customer)
 
-    # CREATE (order_id + menu_id + qty)
+    # CREATE 
     def test_orderitem_create(self):
         r = self.client.post(
             "/api/order-items/",
@@ -212,7 +212,7 @@ class OrderItemCRUDTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["id"], items[1].id)
 
-    # UPDATE (меняем qty)
+    # UPDATE 
     def test_orderitem_update(self):
         oi = baker.make(OrderItem, order=self.order, menu=self.menu, qty=1)
         r = self.client.put(

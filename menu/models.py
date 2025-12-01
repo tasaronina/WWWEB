@@ -21,7 +21,6 @@ class Menu(models.Model):
         verbose_name="Категория",
         related_name="menus",
     )
-    # НОВОЕ ПОЛЕ ЦЕНЫ
     price = models.DecimalField("Цена", max_digits=10, decimal_places=2, default=0)
     picture = models.ImageField("Изображение", null=True, upload_to="menus")
 
@@ -93,3 +92,26 @@ class OrderItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.menu} x {self.qty}"
+
+
+
+class Profile(models.Model):
+    user = models.OneToOneField(
+        "auth.User", on_delete=models.CASCADE, related_name="profile", verbose_name="Пользователь"
+    )
+    ROLE_CHOICES = [
+        ("USER", "Пользователь"),
+        ("ADMIN", "Администратор"),
+    ]
+    role = models.CharField("Роль", max_length=16, choices=ROLE_CHOICES, default="USER")
+
+    
+    twofa_passed = models.BooleanField("2FA пройдена", default=False)
+    twofa_expires_at = models.DateTimeField("2FA истекает", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Профиль"
+        verbose_name_plural = "Профили"
+
+    def __str__(self):
+        return f"Профиль {self.user.username}"

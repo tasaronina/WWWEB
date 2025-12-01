@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Category, Customer, Menu, Order, OrderItem
+from .models import Category, Menu, Customer, Order, OrderItem, Profile
 
 
 @admin.register(Category)
@@ -8,18 +8,17 @@ class CategoryAdmin(admin.ModelAdmin):
     search_fields = ("name",)
 
 
+@admin.register(Menu)
+class MenuAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "group", "price")
+    list_filter = ("group",)
+    search_fields = ("name",)
+
+
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "phone", "user")
-    list_filter = ("user",)
     search_fields = ("name", "phone")
-
-
-@admin.register(Menu)
-class MenuAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "group")
-    list_filter = ("group",)
-    search_fields = ("name",)
 
 
 class OrderItemInline(admin.TabularInline):
@@ -30,12 +29,11 @@ class OrderItemInline(admin.TabularInline):
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = ("id", "customer", "status", "created_at", "user")
-    list_filter = ("user", "status")
-    date_hierarchy = "created_at"
+    list_filter = ("status",)
     inlines = [OrderItemInline]
 
 
-@admin.register(OrderItem)
-class OrderItemAdmin(admin.ModelAdmin):
-    list_display = ("id", "order", "menu", "qty")
-    search_fields = ("order__id", "menu__name")
+@admin.register(Profile)
+class ProfileAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "role", "twofa_passed", "twofa_expires_at")
+    list_filter = ("role", "twofa_passed")

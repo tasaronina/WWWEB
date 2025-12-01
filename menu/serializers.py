@@ -11,7 +11,6 @@ class CategorySerializer(serializers.ModelSerializer):
 
 class MenuSerializer(serializers.ModelSerializer):
     group = CategorySerializer(read_only=True)
-    # group_id — для записи (как в методичке)
     group_id = serializers.PrimaryKeyRelatedField(
         source="group",
         queryset=Category.objects.all(),
@@ -39,7 +38,6 @@ class OrderSerializer(serializers.ModelSerializer):
         queryset=Customer.objects.all(),
         write_only=True,
     )
-    # сумма заказа
     total_price = serializers.SerializerMethodField()
 
     class Meta:
@@ -57,11 +55,9 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_total_price(self, obj):
         total = 0
-        # items — related_name в OrderItem
         for item in obj.items.all():
             if item.menu and item.menu.price is not None:
                 total += item.menu.price * item.qty
-        # в JSON отдаём обычное число
         return float(total)
 
 
@@ -78,7 +74,6 @@ class OrderItemSerializer(serializers.ModelSerializer):
         queryset=Menu.objects.all(),
         write_only=True,
     )
-    # цена строки = цена блюда * qty
     line_price = serializers.SerializerMethodField()
 
     class Meta:
