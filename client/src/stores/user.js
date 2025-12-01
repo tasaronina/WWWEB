@@ -1,46 +1,54 @@
-// client/src/stores/user.js
 import { defineStore } from "pinia";
-import { getMe, doLogin, doLogout } from "@/api";
-import router from "@/router";
+import { apiMe, apiLogin, apiLogout } from "@/api";
 
 export const useUserStore = defineStore("user", {
   state: () => ({
-    user: null,           // {id, username, is_staff, is_superuser}
-    ready: false,         // инициализация завершена
+    me: null,
+    initialized: false,
+    loading: false,
   }),
+
   getters: {
-    isAuth: (s) => !!s.user,
-    username: (s) => (s.user ? s.user.username : ""),
-    isAdmin: (s) => !!(s.user && (s.user.is_staff || s.user.is_superuser)),
+    isAuth: (s) => !!(s.me && s.me.id),
+    isAdmin: (s) => !!(s.me && (s.me.is_staff || s.me.is_superuser)),
+    username: (s) => s.me?.username ?? "",
   },
+
   actions: {
-    async restore() {
+    // Восстановление сессии при старте приложения/перезагрузке
+    async restore(force = false) {
+      if (this.initialized && !force) return;
+      this.loading = true;
       try {
-        const me = await getMe();
-        // Когда не залогинен — сервер отдаёт {} или is_authenticated=false
-        this.user = me && me.username ? me : null;
-      } catch {
-        this.user = null;
+        const data = await apiMe();
+        this.me = data?.is_authenticated
+          ? {
+              id: data.id,
+              username: data.username,
+              is_staff: !!data.is_staff,
+              is_superuser: !!data.is_superuser,
+            }
+          : null;
       } finally {
-        this.ready = true;
+        this.initialized = true;
+        this.loading = false;
       }
     },
 
+    // Логин
     async login(username, password) {
-      const me = await doLogin(username, password);
-      // сервер возвращает id/username/is_staff/is_superuser
-      this.user = me && me.username ? me : null;
-      if (!this.user) throw new Error("bad credentials");
+      await apiLogin(username, password);
+      await this.restore(true);
     },
 
+    // Логаут + мгновенный редирект на /login
     async logout() {
-      try { await doLogout(); } finally {
-        this.user = null;
-        // жёстко отправляем на логин, чтобы не оставаться на /menu
-        if (router.currentRoute.value.path !== "/login") {
-          await router.replace("/login");
-        }
-      }
+      try { await apiLogout(); } catch { /* игнор сетевых ошибок */ }
+      this.me = null;
+      this.initialized = false;
+
+      // ВАЖНО: убираем защищённую страницу из истории и переходим на логин
+      window.location.replace("/login");
     },
   },
 });

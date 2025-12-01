@@ -2,6 +2,28 @@
   <div class="container my-4">
     <h1 class="mb-3">Позиции меню</h1>
 
+    <!-- Режим добавления для пользователя -->
+    <div v-if="!canAdmin" class="alert alert-light border d-flex flex-wrap gap-3 align-items-center mb-3">
+      <strong>Режим добавления:</strong>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" id="mode-one" value="one" v-model="addMode">
+        <label class="form-check-label" for="mode-one">В один заказ</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" id="mode-sep" value="sep" v-model="addMode">
+        <label class="form-check-label" for="mode-sep">Раздельно (каждая позиция — отдельный заказ)</label>
+      </div>
+
+      <div v-if="addMode==='one'" class="ms-auto d-flex align-items-center gap-2">
+        <span class="small text-muted">
+          Текущий заказ: <strong>{{ currentOrderId ? ('#'+currentOrderId) : '— (создастся при добавлении)' }}</strong>
+        </span>
+        <button class="btn btn-sm btn-outline-secondary" @click="startNewOrder">Начать новый</button>
+      </div>
+
+      <span class="text-muted small" v-if="flash">{{ flash }}</span>
+    </div>
+
     <!-- Добавить позицию (только админ) -->
     <div class="card mb-3" v-if="canAdmin">
       <div class="card-body">
@@ -47,7 +69,9 @@
     <div class="card mb-3">
       <div class="card-body">
         <div class="row g-2">
-          <div class="col-md-6"><input v-model="filters.search" class="form-control" placeholder="Фильтр по названию" /></div>
+          <div class="col-md-6">
+            <input v-model="filters.search" class="form-control" placeholder="Фильтр по названию" />
+          </div>
           <div class="col-md-6">
             <select v-model="filters.category" class="form-select">
               <option value="">Все категории</option>
@@ -69,11 +93,13 @@
               <th>Название</th>
               <th style="width:200px;">Категория</th>
               <th style="width:120px;">Цена</th>
-              <th style="width:210px;" v-if="canAdmin">Действия</th>
+              <th v-if="!canAdmin" style="width:220px;">В корзину</th>
+              <th v-if="canAdmin" style="width:210px;">Действия</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="6" class="text-center text-muted">Загрузка…</td></tr>
+            <tr v-if="loading"><td :colspan="canAdmin ? 6 : 6" class="text-center text-muted">Загрузка…</td></tr>
+
             <tr v-for="m in filteredMenu" :key="m.id">
               <td>{{ m.id }}</td>
               <td>
@@ -85,6 +111,19 @@
               <td class="fw-semibold">{{ m.name }}</td>
               <td>{{ categoryName(m.group_id) || "—" }}</td>
               <td>{{ money(m.price) }}</td>
+
+              <td v-if="!canAdmin">
+                <div class="d-flex gap-2 align-items-center">
+                  <input type="number" min="1" class="form-control form-control-sm" style="max-width:90px"
+                         v-model.number="qty[m.id]" @focus="initQty(m.id)">
+                  <button class="btn btn-sm btn-primary"
+                          :disabled="adding[m.id] === true"
+                          @click="addToCart(m.id)">
+                    {{ adding[m.id] ? "Добавляем..." : "Добавить" }}
+                  </button>
+                </div>
+              </td>
+
               <td v-if="canAdmin">
                 <div class="btn-group">
                   <button class="btn btn-outline-primary btn-sm" @click="startEdit(m)">Редактировать</button>
@@ -92,16 +131,17 @@
                 </div>
               </td>
             </tr>
+
             <tr v-if="!loading && !filteredMenu.length">
-              <td colspan="6" class="text-center text-muted">Ничего не найдено</td>
+              <td :colspan="canAdmin ? 6 : 6" class="text-center text-muted">Ничего не найдено</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- Модалка редактирования -->
-    <div class="modal fade" tabindex="-1" ref="editModalRef">
+    <!-- Модалка редактирования (только админ) -->
+    <div class="modal fade" tabindex="-1" ref="editModalRef" v-if="canAdmin">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <form @submit.prevent="saveEdit">
@@ -158,19 +198,23 @@
 
 <script setup>
 import {ref, computed, onMounted} from "vue"
-import axios from "axios"
 import "bootstrap/dist/js/bootstrap.bundle.min.js"
 import "@/styles/admin.css"
+import api, { ensureCsrf } from "@/api"
 
-axios.defaults.withCredentials = true
-
-const canAdmin = ref(true)
+const canAdmin = ref(false)
+const addMode  = ref("one")
+const flash    = ref("")
+const currentOrderId = ref(null)   // ← сюда запоминаем «текущий заказ»
+const newOrderNext   = ref(false)  // ← флаг «следующее добавление создаёт новый заказ»
 
 const categories = ref([])
 const menu = ref([])
 const loading = ref(false)
 
 const filters = ref({ search:"", category:"" })
+const qty = ref({})
+const adding = ref({})
 
 const createForm = ref({ name:"", group_id:null, price:0, file:null })
 const creating = ref(false)
@@ -185,6 +229,14 @@ const editForm = ref({
 
 function money(v){ return Number(v||0).toFixed(2) }
 function categoryName(id){ return categories.value.find(c=>c.id===id)?.name || "" }
+function initQty(id){ if(!qty.value[id] || qty.value[id] < 1) qty.value[id] = 1 }
+
+function startNewOrder(){
+  currentOrderId.value = null
+  newOrderNext.value = true
+  flash.value = "Новый заказ: добавьте первую позицию"
+  setTimeout(()=> flash.value = "", 1500)
+}
 
 const filteredMenu = computed(()=>{
   const q = filters.value.search.trim().toLowerCase()
@@ -199,36 +251,25 @@ const filteredMenu = computed(()=>{
 const stats = computed(()=>{
   const arr = menu.value.map(m=>Number(m.price||0))
   const total = menu.value.length
-  return {
-    total,
-    avg: total ? arr.reduce((a,b)=>a+b,0)/total : 0,
-    max: arr.length ? Math.max(...arr) : 0,
-    min: arr.length ? Math.min(...arr) : 0
-  }
+  return { total, avg: total ? arr.reduce((a,b)=>a+b,0)/total : 0, max: arr.length ? Math.max(...arr) : 0, min: arr.length ? Math.min(...arr) : 0 }
 })
 
-async function loadCategories(){
-  const {data} = await axios.get("/api/categories/")
-  categories.value = data
+async function detectAdmin() {
+  try { const { data } = await api.get("/api/auth/me/"); canAdmin.value = !!(data?.is_staff || data?.is_superuser) }
+  catch { canAdmin.value = false }
 }
+
+async function loadCategories(){ const {data} = await api.get("/api/categories/"); categories.value = data }
 async function loadMenu(){
   loading.value = true
   try{
-    const {data} = await axios.get("/api/menu/")
+    const {data} = await api.get("/api/menu/")
     menu.value = data.map(x=>{
-      // корректно вытаскиваем идентификатор категории
       const groupId =
         x.group_id ??
         (x.group && typeof x.group === "object" ? x.group.id : x.group) ??
-        (x.category && typeof x.category === "object" ? x.category.id : x.category) ??
-        null
-      return {
-        id:x.id,
-        name:x.name ?? x.title ?? "",
-        group_id: Number.isFinite(Number(groupId)) ? Number(groupId) : null,
-        price:Number(x.price ?? 0),
-        pictureUrl:x.picture || x.image || null
-      }
+        (x.category && typeof x.category === "object" ? x.category.id : x.category) ?? null
+      return { id:x.id, name:x.name ?? x.title ?? "", group_id: Number(groupId) || null, price:Number(x.price ?? 0), pictureUrl:x.picture || x.image || null }
     })
   } finally { loading.value = false }
 }
@@ -237,6 +278,7 @@ function onPickCreate(e){ createForm.value.file = e.target.files?.[0] || null }
 async function onCreate(){
   creating.value = true
   try{
+    await ensureCsrf()
     const fd = new FormData()
     fd.append("name", createForm.value.name)
     if(Number.isFinite(Number(createForm.value.group_id))){
@@ -245,18 +287,12 @@ async function onCreate(){
       fd.append("category", String(createForm.value.group_id))
     }
     fd.append("price", String(Number(createForm.value.price||0)))
-    if(createForm.value.file){
-      fd.append("picture", createForm.value.file)
-      fd.append("image", createForm.value.file)
-    }
-    const {data} = await axios.post("/api/menu/", fd, { headers:{ "Content-Type":"multipart/form-data" } })
-    // добавляем и поддерживаем порядок по ID ↑
+    if(createForm.value.file){ fd.append("picture", createForm.value.file); fd.append("image", createForm.value.file) }
+    const {data} = await api.post("/api/menu/", fd, { headers:{ "Content-Type":"multipart/form-data" } })
     menu.value.push({
-      id:data.id,
-      name:data.name ?? createForm.value.name,
+      id:data.id, name:data.name ?? createForm.value.name,
       group_id: data.group_id ?? (data.group?.id) ?? data.category ?? createForm.value.group_id ?? null,
-      price:data.price ?? createForm.value.price,
-      pictureUrl: data.picture || data.image || null
+      price:data.price ?? createForm.value.price, pictureUrl: data.picture || data.image || null
     })
     menu.value.sort((a,b)=>a.id-b.id)
     createForm.value = { name:"", group_id:null, price:0, file:null }
@@ -266,16 +302,7 @@ async function onCreate(){
 function startEdit(m){
   if(!editModal && editModalRef.value) editModal = window.bootstrap.Modal.getOrCreateInstance(editModalRef.value)
   editError.value = ""
-  editForm.value = {
-    id:m.id,
-    name:m.name,
-    group_id:m.group_id,
-    price:Number(m.price||0),
-    pictureUrl:m.pictureUrl,
-    file:null,
-    preview:null,
-    delete_picture:false
-  }
+  editForm.value = { id:m.id, name:m.name, group_id:m.group_id, price:Number(m.price||0), pictureUrl:m.pictureUrl, file:null, preview:null, delete_picture:false }
   editModal?.show()
 }
 function onPickEdit(e){
@@ -288,6 +315,7 @@ async function saveEdit(){
   saving.value = true
   editError.value = ""
   try{
+    await ensureCsrf()
     const fd = new FormData()
     fd.append("name", editForm.value.name)
     if(Number.isFinite(Number(editForm.value.group_id))){
@@ -296,20 +324,13 @@ async function saveEdit(){
       fd.append("category", String(editForm.value.group_id))
     }
     fd.append("price", String(Number(editForm.value.price || 0)))
-    if(editForm.value.file){
-      fd.append("picture", editForm.value.file)
-      fd.append("image", editForm.value.file)
-    }
-    if(editForm.value.delete_picture){
-      fd.append("delete_picture","1")
-      fd.append("remove_picture","1")
-    }
-    const {data} = await axios.patch(`/api/menu/${editForm.value.id}/`, fd, { headers:{ "Content-Type":"multipart/form-data" } })
+    if(editForm.value.file){ fd.append("picture", editForm.value.file); fd.append("image", editForm.value.file) }
+    if(editForm.value.delete_picture){ fd.append("delete_picture","1"); fd.append("remove_picture","1") }
+    const {data} = await api.patch(`/api/menu/${editForm.value.id}/`, fd, { headers:{ "Content-Type":"multipart/form-data" } })
     const i = menu.value.findIndex(x=>x.id===editForm.value.id)
     if(i>-1){
       menu.value[i] = {
-        id:data.id,
-        name:data.name ?? editForm.value.name,
+        id:data.id, name:data.name ?? editForm.value.name,
         group_id: data.group_id ?? (data.group?.id) ?? data.category ?? editForm.value.group_id ?? null,
         price:data.price ?? editForm.value.price,
         pictureUrl: data.picture || data.image || (editForm.value.delete_picture ? null : menu.value[i].pictureUrl)
@@ -322,11 +343,64 @@ async function saveEdit(){
 }
 async function onDelete(id){
   if(!confirm("Удалить позицию меню?")) return
-  await axios.delete(`/api/menu/${id}/`)
+  await ensureCsrf()
+  await api.delete(`/api/menu/${id}/`)
   menu.value = menu.value.filter(x=>x.id!==id)
 }
 
-onMounted(async ()=>{ await Promise.all([loadCategories(), loadMenu()]) })
+/* ----------- Пользователь: добавить в корзину ----------- */
+async function addToCart(menuId){
+  if (adding.value[menuId]) return;
+  adding.value[menuId] = true;
+  try {
+    initQty(menuId);
+    const count = Math.max(1, Number(qty.value[menuId] || 1));
+
+    await ensureCsrf();
+
+    const payload = { menu_id: menuId, qty: count };
+
+    if (addMode.value === "one") {
+      if (currentOrderId.value) {
+        payload.order_id = currentOrderId.value;          // добавляем строго в текущий
+      } else {
+        payload.new_order = true;                         // создаём новый для первой позиции
+      }
+      if (newOrderNext.value) payload.new_order = true;   // принудительно «новый» после нажатия кнопки
+    }
+
+    // «sep»: каждая позиция отдельным NEW заказом
+    if (addMode.value === "sep") {
+      payload.new_order = true;
+    }
+
+    const { data } = await api.post("/api/orders/add-to-cart/", payload);
+
+    const createdOrderId =
+      data?.order_id || data?.item?.order || data?.item?.order_id || data?.item?.order?.id || null;
+
+    if (addMode.value === "one") {
+      if (!currentOrderId.value || newOrderNext.value) {
+        currentOrderId.value = createdOrderId;
+      }
+      newOrderNext.value = false;
+    } else {
+      // раздельный — не ведём текущий
+      currentOrderId.value = null;
+    }
+
+    flash.value = `Добавлено: #${menuId} × ${count}${createdOrderId ? " → заказ #" + createdOrderId : ""}`
+    qty.value[menuId] = 1;
+    setTimeout(()=>{ flash.value = "" }, 1500);
+  } finally {
+    adding.value[menuId] = false;
+  }
+}
+
+onMounted(async ()=>{
+  await detectAdmin();
+  await Promise.all([loadCategories(), loadMenu()]);
+});
 </script>
 
 <style scoped>

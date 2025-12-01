@@ -2,14 +2,14 @@ from django.contrib.auth import authenticate, login, logout
 from django.db.models import (
     F, Sum, Avg, Max, Min, Count, ExpressionWrapper, DecimalField
 )
-from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
+from django.middleware.csrf import get_token
+from django.views.decorators.csrf import csrf_exempt
 
-from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework import viewsets, permissions
+from rest_framework.decorators import action, api_view, permission_classes, authentication_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 from .models import Category, Menu, Customer, Order, OrderItem
 from .serializers import (
@@ -17,115 +17,78 @@ from .serializers import (
     OrderSerializer, OrderItemSerializer
 )
 
-# =========================
-# CSRF & AUTH
-# =========================
+# ---------------- CSRF & AUTH ----------------
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def csrf_view(request):
-    """Отдаёт и устанавливает csrftoken-cookie."""
+    """Выдаёт/обновляет csrftoken cookie (для фронта, если нужно)."""
     return Response({"csrfToken": get_token(request)})
 
+@csrf_exempt  # не требуем CSRF именно на логине, чтобы не падать 403
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@authentication_classes([])  # не тащим SessionAuthentication для логина
 def login_view(request):
-    """Логин по SessionAuth (username/password)."""
     username = request.data.get("username") or request.data.get("login") or ""
     password = request.data.get("password") or ""
     user = authenticate(request, username=username, password=password)
     if not user:
         return Response({"detail": "Неверные логин/пароль"}, status=400)
     login(request, user)
-    return Response({
-        "id": user.id,
-        "username": user.get_username(),
-        "is_staff": user.is_staff,
-        "is_superuser": user.is_superuser,
-    })
+    return Response({"ok": True})
 
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def logout_view(request):
-    """Выход (сброс сессии)."""
     logout(request)
     return Response({"ok": True})
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def me_view(request):
-    """Информация о текущем пользователе (или пусто, если гость)."""
     if not request.user.is_authenticated:
-        return Response({}, status=200)
+        return Response({"is_authenticated": False}, status=200)
     u = request.user
     return Response({
+        "is_authenticated": True,
         "id": u.id,
-        "username": u.get_username(),
+        "username": u.username,
         "is_staff": u.is_staff,
         "is_superuser": u.is_superuser,
     })
 
-# =========================
-# Permissions
-# =========================
+
+# ---------------- Permissions ----------------
 
 class IsAdminOrReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return True
-        return bool(request.user and request.user.is_authenticated and
-                    (request.user.is_staff or request.user.is_superuser))
+        return (
+            request.user
+            and request.user.is_authenticated
+            and (request.user.is_staff or request.user.is_superuser)
+        )
 
-# =========================
-# Helpers
-# =========================
 
-def annotate_total(qs):
-    """total = SUM(items.qty * items.menu.price) как Decimal."""
-    money = ExpressionWrapper(
-        F("items__qty") * F("items__menu__price"),
-        output_field=DecimalField(max_digits=12, decimal_places=2),
-    )
-    return qs.annotate(total=Sum(money))
-
-# =========================
-# ViewSets
-# =========================
+# ---------------- Catalog ----------------
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all().order_by("id")
     serializer_class = CategorySerializer
     permission_classes = [IsAdminOrReadOnly]
 
-    @action(detail=False, methods=["get"])
-    def stats(self, request):
-        data = self.get_queryset().aggregate(
-            count=Count("id"),
-            avg=Avg("id"),
-            max=Max("id"),
-            min=Min("id"),
-        )
-        return Response({
-            "count": data["count"] or 0,
-            "avg": float(data["avg"] or 0),
-            "max": data["max"] or 0,
-            "min": data["min"] or 0,
-        })
-
 
 class MenuViewSet(viewsets.ModelViewSet):
     queryset = Menu.objects.select_related("group").all().order_by("id")
     serializer_class = MenuSerializer
     permission_classes = [IsAdminOrReadOnly]
-    parser_classes = (MultiPartParser, FormParser, JSONParser)  # для фото
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
-        data = self.get_queryset().aggregate(
-            count=Count("id"),
-            avg=Avg("price"),
-            max=Max("price"),
-            min=Min("price"),
-        )
+        qs = self.get_queryset()
+        data = qs.aggregate(count=Count("id"), avg=Avg("price"), max=Max("price"), min=Min("price"))
         return Response({
             "count": data["count"] or 0,
             "avg": float(data["avg"] or 0),
@@ -134,20 +97,17 @@ class MenuViewSet(viewsets.ModelViewSet):
         })
 
 
+# ---------------- Customers ----------------
+
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all().order_by("id")
     serializer_class = CustomerSerializer
     permission_classes = [IsAdminOrReadOnly]
-    parser_classes = (MultiPartParser, FormParser, JSONParser)  # для фото
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
-        data = self.get_queryset().aggregate(
-            count=Count("id"),
-            avg=Avg("id"),
-            max=Max("id"),
-            min=Min("id"),
-        )
+        qs = self.get_queryset()
+        data = qs.aggregate(count=Count("id"), avg=Avg("id"), max=Max("id"), min=Min("id"))
         return Response({
             "count": data["count"] or 0,
             "avg": float(data["avg"] or 0),
@@ -156,26 +116,35 @@ class CustomerViewSet(viewsets.ModelViewSet):
         })
 
 
+# ---------------- Orders & Items ----------------
+
+def _with_total_queryset(base_qs):
+    money = ExpressionWrapper(
+        F("items__qty") * F("items__menu__price"),
+        output_field=DecimalField(max_digits=12, decimal_places=2),
+    )
+    return base_qs.annotate(total=Sum(money))
+
+
 class OrderViewSet(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        qs = Order.objects.select_related("customer", "user") \
-                          .prefetch_related("items", "items__menu")
-        user = self.request.user
-        if not (user.is_staff or user.is_superuser):
-            qs = qs.filter(user=user)
-        return annotate_total(qs).order_by("-id")
+        qs = (
+            Order.objects
+            .select_related("customer", "user")
+            .prefetch_related("items", "items__menu")
+            .order_by("-id")
+        )
+        if not (self.request.user.is_staff or self.request.user.is_superuser):
+            qs = qs.filter(user=self.request.user)
+        return _with_total_queryset(qs)
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
-        data = self.get_queryset().aggregate(
-            count=Count("id"),
-            avg=Avg("id"),
-            max=Max("id"),
-            min=Min("id"),
-        )
+        qs = self.get_queryset()
+        data = qs.aggregate(count=Count("id"), avg=Avg("id"), max=Max("id"), min=Min("id"))
         return Response({
             "count": data["count"] or 0,
             "avg": float(data["avg"] or 0),
@@ -185,8 +154,12 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="add-to-cart")
     def add_to_cart(self, request):
-        """Добавление позиции в корзину текущего пользователя (status=NEW)."""
-        if not request.user.is_authenticated:
+        """
+        USER добавляет позицию в корзину.
+        Если нет открытого заказа NEW — создаём его.
+        """
+        user = request.user
+        if not user.is_authenticated:
             return Response({"detail": "Auth required"}, status=403)
 
         menu_id = request.data.get("menu_id")
@@ -196,13 +169,15 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         menu_obj = get_object_or_404(Menu, id=menu_id)
 
-        # Подвязываем клиента (если нет — создаём базового по имени пользователя)
-        name = (request.user.get_full_name() or request.user.get_username() or "Покупатель").strip()
-        customer, _ = Customer.objects.get_or_create(name=name)
+        # Находим/создаем клиента по имени пользователя
+        display_name = (user.get_full_name() or user.username or "Покупатель").strip()
+        customer, _ = Customer.objects.get_or_create(name=display_name)
 
-        # Берём/создаём незакрытый заказ пользователя
+        # Берём незакрытый заказ NEW или создаём
         order, created = Order.objects.get_or_create(
-            user=request.user, status="NEW", defaults={"customer": customer}
+            user=user,
+            status="NEW",
+            defaults={"customer": customer},
         )
         if not order.customer_id:
             order.customer = customer
@@ -216,7 +191,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             item.qty = item.qty + qty
             item.save(update_fields=["qty"])
 
-        return Response({"ok": True, "item": OrderItemSerializer(item).data}, status=200)
+        ser_item = OrderItemSerializer(item)
+        return Response({"ok": True, "item": ser_item.data})
 
 
 class OrderItemViewSet(viewsets.ModelViewSet):
@@ -225,23 +201,11 @@ class OrderItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
         qs = super().get_queryset()
+        user = self.request.user
         if not (user.is_staff or user.is_superuser):
             qs = qs.filter(order__user=user)
+        order_id = self.request.query_params.get("order_id")
+        if order_id:
+            qs = qs.filter(order_id=order_id)
         return qs.order_by("-id")
-
-    @action(detail=False, methods=["get"])
-    def stats(self, request):
-        data = self.get_queryset().aggregate(
-            count=Count("id"),
-            avg=Avg("id"),
-            max=Max("id"),
-            min=Min("id"),
-        )
-        return Response({
-            "count": data["count"] or 0,
-            "avg": float(data["avg"] or 0),
-            "max": data["max"] or 0,
-            "min": data["min"] or 0,
-        })
