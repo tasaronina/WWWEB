@@ -16,13 +16,16 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
-
       '/admin': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
-
       '/static': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      // 🔧 ВАЖНО: проксируем MEDIA, чтобы <img src="/media/..."> работали с фронта:5173
+      '/media': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },

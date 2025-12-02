@@ -33,13 +33,15 @@
           <div class="row g-3 align-items-end">
             <div class="col-md-4">
               <label class="form-label">Название</label>
-              <input v-model="createForm.name" class="form-control" required />
+              <input v-model="createForm.title" class="form-control" required />
             </div>
             <div class="col-md-3">
               <label class="form-label">Категория</label>
               <select v-model="createForm.group_id" class="form-select">
                 <option :value="null">— не выбрано —</option>
-                <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+                <option v-for="c in categories" :key="c.id" :value="c.id">
+                  {{ c.title || c.name }}
+                </option>
               </select>
             </div>
             <div class="col-md-2">
@@ -76,7 +78,9 @@
           <div class="col-md-6">
             <select v-model="filters.category" class="form-select">
               <option value="">Все категории</option>
-              <option v-for="c in categories" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
+              <option v-for="c in categories" :key="c.id" :value="String(c.id)">
+                {{ c.title || c.name }}
+              </option>
             </select>
           </div>
         </div>
@@ -100,7 +104,7 @@
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td :colspan="canAdmin ? 6 : 6" class="text-center text-muted">Загрузка…</td>
+              <td :colspan="6" class="text-center text-muted">Загрузка…</td>
             </tr>
 
             <tr v-for="m in filteredMenu" :key="m.id">
@@ -111,20 +115,25 @@
                   <div v-else class="thumb-empty">нет</div>
                 </div>
               </td>
-              <td class="fw-semibold">{{ m.name }}</td>
+              <td class="fw-semibold">{{ m.title }}</td>
               <td>{{ categoryName(m.group_id) || "—" }}</td>
               <td>{{ money(m.price) }}</td>
 
+              <!-- Пользователь: добавить в заказ -->
               <td v-if="!canAdmin">
                 <div class="d-flex gap-2 align-items-center">
-                  <input type="number" min="1" class="form-control form-control-sm" style="max-width:90px"
-                         v-model.number="qty[m.id]" @focus="initQty(m.id)">
+                  <input
+                    type="number" min="1"
+                    class="form-control form-control-sm" style="max-width:90px"
+                    v-model.number="qty[m.id]" @focus="initQty(m.id)"
+                  >
                   <button class="btn btn-sm btn-primary" :disabled="adding[m.id]===true" @click="addToCart(m.id)">
                     {{ adding[m.id] ? "Добавляем..." : "Добавить" }}
                   </button>
                 </div>
               </td>
 
+              <!-- Админ: CRUD -->
               <td v-if="canAdmin">
                 <div class="btn-group">
                   <button class="btn btn-outline-primary btn-sm" @click="startEdit(m)">Редактировать</button>
@@ -134,14 +143,14 @@
             </tr>
 
             <tr v-if="!loading && !filteredMenu.length">
-              <td :colspan="canAdmin ? 6 : 6" class="text-center text-muted">Ничего не найдено</td>
+              <td :colspan="6" class="text-center text-muted">Ничего не найдено</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- Модалка редактирования -->
+    <!-- Модалка редактирования (только админ) -->
     <div class="modal fade" tabindex="-1" ref="editModalRef" v-if="canAdmin">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -154,13 +163,15 @@
               <div class="row g-3">
                 <div class="col-md-6">
                   <label class="form-label">Название</label>
-                  <input v-model="editForm.name" class="form-control" required />
+                  <input v-model="editForm.title" class="form-control" required />
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Категория</label>
                   <select v-model="editForm.group_id" class="form-select">
                     <option :value="null">— не выбрано —</option>
-                    <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+                    <option v-for="c in categories" :key="c.id" :value="c.id">
+                      {{ c.title || c.name }}
+                    </option>
                   </select>
                 </div>
                 <div class="col-md-4">
@@ -224,7 +235,7 @@ const filters = ref({ search:"", category:"" });
 const qty = ref({});
 const adding = ref({});
 
-const createForm = ref({ name:"", group_id:null, price:0, file:null });
+const createForm = ref({ title:"", group_id:null, price:0, file:null });
 const creating = ref(false);
 
 const editModalRef = ref(null);
@@ -232,12 +243,15 @@ let editModal = null;
 const saving = ref(false);
 const editError = ref("");
 const editForm = ref({
-  id:null, name:"", group_id:null, price:0, pictureUrl:null, file:null, preview:null, delete_picture:false
+  id:null, title:"", group_id:null, price:0, pictureUrl:null, file:null, preview:null, delete_picture:false
 });
 
 /* helpers */
 function money(v){ return Number(v||0).toFixed(2); }
-function categoryName(id){ return categories.value.find(c=>c.id===id)?.name || ""; }
+function categoryName(id){
+  const c = categories.value.find(c=>String(c.id)===String(id));
+  return c ? (c.title || c.name) : "";
+}
 function initQty(id){ if(!qty.value[id] || qty.value[id] < 1) qty.value[id] = 1; }
 function startNewOrder(){ currentOrderId.value = null; newOrderNext.value = true; flash.value = "Новый заказ: добавьте первую позицию"; setTimeout(()=> flash.value = "", 1500); }
 
@@ -245,7 +259,7 @@ const filteredMenu = computed(()=>{
   const q = filters.value.search.trim().toLowerCase();
   const cat = filters.value.category;
   return menu.value.filter(m=>{
-    if(q && !(m.name||"").toLowerCase().includes(q)) return false;
+    if(q && !(m.title||"").toLowerCase().includes(q)) return false;
     if(cat && String(m.group_id)!==cat) return false;
     return true;
   });
@@ -261,7 +275,9 @@ const stats = computed(()=>{
 async function detectAdmin(){
   try{
     const { data } = await axios.get("/api/auth/me/");
-    canAdmin.value = !!(data?.is_staff || data?.is_superuser);
+    // поддерживаем оба формата: {authenticated, user:{...}} и плоский
+    const u = data?.user || data || {};
+    canAdmin.value = !!(u.is_staff || u.is_superuser);
   }catch{
     canAdmin.value = false;
   }
@@ -270,24 +286,30 @@ async function detectAdmin(){
 async function loadCategories(){
   try{
     const { data } = await axios.get("/api/categories/");
-    categories.value = Array.isArray(data) ? data : (data?.results ?? []);
+    const arr = Array.isArray(data) ? data : (data?.results ?? data ?? []);
+    categories.value = arr.map(c => ({
+      id: c.id,
+      title: c.title || c.name || ""
+    }));
   }catch{
     categories.value = [];
   }
 }
+
 async function loadMenu(){
   loading.value = true;
   try{
     const { data } = await axios.get("/api/menu/");
-    const list = Array.isArray(data) ? data : (data?.results ?? []);
+    const list = Array.isArray(data) ? data : (data?.results ?? data ?? []);
     menu.value = list.map(x=>{
       const groupId =
         x.group_id ??
         (x.group && typeof x.group === "object" ? x.group.id : x.group) ??
-        (x.category && typeof x.category === "object" ? x.category.id : x.category) ?? null;
+        (x.category && typeof x.category === "object" ? x.category.id : x.category) ??
+        null;
       return {
         id: x.id,
-        name: x.name ?? x.title ?? "",
+        title: x.title ?? x.name ?? "",
         group_id: Number(groupId) || null,
         price: Number(x.price ?? 0),
         pictureUrl: x.picture || x.image || null
@@ -302,29 +324,42 @@ async function onCreate(){
   try{
     await ensureCsrf();
     const fd = new FormData();
-    fd.append("name", createForm.value.name);
+    // отправляем поля в ДВУХ вариантах, чтобы покрыть разные сериализаторы
+    fd.append("title", createForm.value.title);
+    fd.append("name",  createForm.value.title);
     if(Number.isFinite(Number(createForm.value.group_id))){
-      fd.append("group_id", String(createForm.value.group_id));
-      fd.append("group", String(createForm.value.group_id));
-      fd.append("category", String(createForm.value.group_id));
+      const gid = String(createForm.value.group_id);
+      fd.append("group_id", gid);
+      fd.append("group",    gid);
+      fd.append("category", gid);
     }
     fd.append("price", String(Number(createForm.value.price||0)));
-    if(createForm.value.file){ fd.append("picture", createForm.value.file); fd.append("image", createForm.value.file); }
+    if(createForm.value.file){
+      fd.append("picture", createForm.value.file);
+      fd.append("image",   createForm.value.file);
+    }
     const { data } = await axios.post("/api/menu/", fd, { headers:{ "Content-Type":"multipart/form-data" } });
     menu.value.push({
-      id:data.id, name:data.name ?? createForm.value.name,
+      id:data.id,
+      title:data.title ?? data.name ?? createForm.value.title,
       group_id: data.group_id ?? (data.group?.id) ?? data.category ?? createForm.value.group_id ?? null,
-      price:data.price ?? createForm.value.price, pictureUrl: data.picture || data.image || null
+      price:data.price ?? createForm.value.price,
+      pictureUrl: data.picture || data.image || null
     });
     menu.value.sort((a,b)=>a.id-b.id);
-    createForm.value = { name:"", group_id:null, price:0, file:null };
+    createForm.value = { title:"", group_id:null, price:0, file:null };
   } finally { creating.value = false; }
 }
 
 function startEdit(m){
-  if(!editModal && editModalRef.value) editModal = window.bootstrap.Modal.getOrCreateInstance(editModalRef.value);
+  if(!editModal && editModalRef.value)
+    editModal = window.bootstrap.Modal.getOrCreateInstance(editModalRef.value, { backdrop:"static", keyboard:false });
   editError.value = "";
-  editForm.value = { id:m.id, name:m.name, group_id:m.group_id, price:Number(m.price||0), pictureUrl:m.pictureUrl, file:null, preview:null, delete_picture:false };
+  editForm.value = {
+    id:m.id, title:m.title, group_id:m.group_id,
+    price:Number(m.price||0), pictureUrl:m.pictureUrl,
+    file:null, preview:null, delete_picture:false
+  };
   editModal?.show();
 }
 function onPickEdit(e){
@@ -338,20 +373,29 @@ async function saveEdit(){
   try{
     await ensureCsrf();
     const fd = new FormData();
-    fd.append("name", editForm.value.name);
+    fd.append("title", editForm.value.title);
+    fd.append("name",  editForm.value.title);
     if(Number.isFinite(Number(editForm.value.group_id))){
-      fd.append("group_id", String(editForm.value.group_id));
-      fd.append("group", String(editForm.value.group_id));
-      fd.append("category", String(editForm.value.group_id));
+      const gid = String(editForm.value.group_id);
+      fd.append("group_id", gid);
+      fd.append("group",    gid);
+      fd.append("category", gid);
     }
     fd.append("price", String(Number(editForm.value.price || 0)));
-    if(editForm.value.file){ fd.append("picture", editForm.value.file); fd.append("image", editForm.value.file); }
-    if(editForm.value.delete_picture){ fd.append("delete_picture","1"); fd.append("remove_picture","1"); }
+    if(editForm.value.file){
+      fd.append("picture", editForm.value.file);
+      fd.append("image",   editForm.value.file);
+    }
+    if(editForm.value.delete_picture){
+      fd.append("delete_picture","1");
+      fd.append("remove_picture","1");
+    }
     const { data } = await axios.patch(`/api/menu/${editForm.value.id}/`, fd, { headers:{ "Content-Type":"multipart/form-data" } });
     const i = menu.value.findIndex(x=>x.id===editForm.value.id);
     if(i>-1){
       menu.value[i] = {
-        id:data.id, name:data.name ?? editForm.value.name,
+        id:data.id,
+        title:data.title ?? data.name ?? editForm.value.title,
         group_id: data.group_id ?? (data.group?.id) ?? data.category ?? editForm.value.group_id ?? null,
         price:data.price ?? editForm.value.price,
         pictureUrl: data.picture || data.image || (editForm.value.delete_picture ? null : menu.value[i].pictureUrl)
@@ -359,6 +403,8 @@ async function saveEdit(){
       menu.value.sort((a,b)=>a.id-b.id);
     }
     editModal?.hide();
+  } catch(e){
+    editError.value = "Не удалось сохранить. Проверьте поля или права.";
   } finally { saving.value = false; }
 }
 async function onDelete(id){

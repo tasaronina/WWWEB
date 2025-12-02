@@ -104,3 +104,12 @@ CSRF_COOKIE_SECURE = False
 # ===== 2FA настройки =====
 OTP_ISSUER = "CafeApp"
 OTP_TRUST_TTL_SECONDS = 300
+
+
+
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "static"
+
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"

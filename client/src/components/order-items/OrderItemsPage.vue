@@ -1,8 +1,7 @@
-<!-- client/src/components/order-items/OrderItemsPage.vue -->
 <script setup>
 import axios from "axios"
 import { ref, onMounted, computed } from "vue"
-import { downloadExport } from "@/api"
+import { downloadExport, ensureCsrf } from "@/api"
 import "@/styles/admin.css"
 
 axios.defaults.withCredentials = true
@@ -11,7 +10,9 @@ const canAdmin = ref(false)
 async function detectAdmin(){
   try{
     const { data } = await axios.get("/api/auth/me/")
-    canAdmin.value = !!(data?.is_superuser || data?.is_staff)
+    // поддерживаем оба формата: плоский и user-вложенный
+    const u = data?.user || data || {}
+    canAdmin.value = !!(u.is_superuser || u.is_staff)
   }catch{
     canAdmin.value = false
   }
@@ -35,12 +36,25 @@ function menuTitle(m){
   return `Позиция #${m}`
 }
 
-async function fetchOrders(){ const { data } = await axios.get("/api/orders/"); orders.value = data }
-async function fetchMenu(){   const { data } = await axios.get("/api/menu/");   menu.value   = data }
-async function fetchItems(){  const { data } = await axios.get("/api/order-items/"); items.value = data }
+async function fetchOrders(){
+  const { data } = await axios.get("/api/orders/")
+  orders.value = Array.isArray(data) ? data : (data?.results ?? [])
+}
+async function fetchMenu(){
+  const { data } = await axios.get("/api/menu/")
+  menu.value = Array.isArray(data) ? data : (data?.results ?? [])
+}
+async function fetchItems(){
+  const { data } = await axios.get("/api/order-items/")
+  items.value = Array.isArray(data) ? data : (data?.results ?? [])
+}
 async function fetchStats(){
-  try{ const { data } = await axios.get("/api/order-items/stats/"); stats.value = data }
-  catch{ stats.value = null }
+  try{
+    const { data } = await axios.get("/api/order-items/stats/")
+    stats.value = data
+  }catch{
+    stats.value = null
+  }
 }
 
 onMounted(async ()=>{
@@ -58,10 +72,11 @@ onMounted(async ()=>{
 async function onCreate(){
   if(!canAdmin.value) return
   if(!form.value.order_id || !form.value.menu_id) return
+  await ensureCsrf()
   await axios.post("/api/order-items/", {
     order_id: Number(form.value.order_id),
     menu_id:  Number(form.value.menu_id),
-    qty:      Number(form.value.qty) || 1
+    qty:      Math.max(1, Number(form.value.qty) || 1)
   })
   form.value = { order_id:"", menu_id:"", qty:1 }
   await Promise.all([fetchItems(), fetchStats()])
@@ -70,20 +85,22 @@ async function onCreate(){
 async function onDelete(it){
   if(!canAdmin.value) return
   if(!confirm("Удалить позицию?")) return
+  await ensureCsrf()
   await axios.delete(`/api/order-items/${it.id}/`)
   await Promise.all([fetchItems(), fetchStats()])
 }
 
 async function onSave(it){
   if(!canAdmin.value) return
-  await axios.patch(`/api/order-items/${it.id}/`, { qty: Number(it.qty)||1 })
+  await ensureCsrf()
+  await axios.patch(`/api/order-items/${it.id}/`, { qty: Math.max(1, Number(it.qty)||1) })
   await Promise.all([fetchItems(), fetchStats()])
 }
 
 function buildExportParams(){ return {} }
 async function onExport(type){
   if(!canAdmin.value) return
-  // ожидание, что в бекенде есть /api/order-items/export/?type=
+  // ожидаем /api/order-items/export/?type=excel|word
   await downloadExport("order-items", buildExportParams(), type, "order_items")
 }
 

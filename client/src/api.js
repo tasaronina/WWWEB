@@ -1,38 +1,63 @@
 import axios from "axios";
 
-// ВАЖНО: используем ТОТ ЖЕ ХОСТ, что и у фронта (127.0.0.1), иначе кука сессии не поедет.
-export const api = axios.create({
-  baseURL: "http://127.0.0.1:8000",
-  withCredentials: true,
-  headers: { "X-Requested-With": "XMLHttpRequest" },
-});
+// глобальные настройки
+axios.defaults.withCredentials = true;
+axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
 
+// ---- CSRF helper ----
 function getCookie(name) {
   if (typeof document === "undefined") return null;
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop().split(";").shift();
-  return null;
+  const m = document.cookie.match(new RegExp("(^|; )" + name + "=([^;]*)"));
+  return m ? decodeURIComponent(m[2]) : null;
 }
+
+function attachCsrf(config) {
+  const method = (config?.method || "get").toLowerCase();
+  if (["post", "put", "patch", "delete"].includes(method)) {
+    config.headers ||= {};
+    if (!config.headers["X-CSRFToken"]) {
+      const token = getCookie("csrftoken");
+      if (token) config.headers["X-CSRFToken"] = token;
+    }
+  }
+  return config;
+}
+
+// подставляем CSRF для ЛЮБЫХ axios-запросов
+axios.interceptors.request.use(attachCsrf);
+
+// инстанс (если где-то импортируют именно api)
+const api = axios.create({});
+api.interceptors.request.use(attachCsrf);
 
 export async function ensureCsrf() {
-  // получаем CSRF cookie и прокидываем в заголовки
-  await api.get("/api/csrf/");
-  const csrftoken = getCookie("csrftoken");
-  if (csrftoken) api.defaults.headers.common["X-CSRFToken"] = csrftoken;
+  await axios.get("/api/csrf/");
 }
 
-export async function login(username, password) {
-  await ensureCsrf();
-  await api.post("/api/auth/login/", { username, password });
-  // Сразу проверяем, приклеилась ли сессия
-  const { data } = await api.get("/api/auth/me/");
-  return data; // { authenticated, user, otp_ttl }
-}
+export async function downloadExport(resource, params = {}, type = "excel", filenameBase = "export") {
+  const { data, headers } = await axios.get(`/api/${resource}/export/`, {
+    params: { ...params, type },
+    responseType: "blob",
+  });
 
-export async function logout() {
-  await ensureCsrf();
-  await api.post("/api/auth/logout/");
+  // имя файла берём из Content-Disposition, если есть
+  let filename = filenameBase;
+  const dispo = headers["content-disposition"] || headers["Content-Disposition"] || "";
+  const m = /filename\*=UTF-8''([^;]+)|filename="?([^"]+)"?/i.exec(dispo);
+  if (m) {
+    filename = decodeURIComponent((m[1] || m[2] || "").trim());
+  } else {
+    filename += type === "word" ? ".doc" : ".csv";
+  }
+
+  const url = URL.createObjectURL(data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export default api;

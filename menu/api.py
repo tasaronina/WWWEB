@@ -1,227 +1,279 @@
 # menu/api.py
-from datetime import datetime, timedelta, timezone as dt_tz
-from django.conf import settings
-from django.contrib.auth import authenticate, login, logout
-from django.core.cache import cache
-from django.middleware.csrf import get_token
-from django.shortcuts import get_object_or_404
+from io import StringIO
+import csv
+import time
 
-from rest_framework import status, viewsets
-from rest_framework.routers import DefaultRouter
-from rest_framework.decorators import api_view, permission_classes, action
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.middleware.csrf import get_token
+from django.utils import timezone
+from django.contrib.auth import authenticate, login as dj_login, logout as dj_logout
+from django.conf import settings
+
+from rest_framework.viewsets import ModelViewSet
 from rest_framework.response import Response
+from rest_framework.decorators import action, api_view
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.routers import DefaultRouter
+
+from django.db.models import Avg, Max, Min, Count
 
 import pyotp
 
 from .models import Category, Menu, Customer, Order, OrderItem, Profile
 from .serializers import (
-    CategorySerializer, MenuSerializer, CustomerSerializer,
-    OrderSerializer, OrderItemSerializer
+    CategorySerializer,
+    MenuSerializer,
+    CustomerSerializer,
+    OrderSerializer,
+    OrderItemSerializer,
 )
 from .permissions import (
     IsAdminOrReadOnly,
+    WriteRequiresOTP,
     AllowUserWriteOrAdminWithOTP,
     IsOwnerOrAdmin,
-    # если у тебя есть WriteRequiresOTP — можно добавить в нужные вьюсеты
 )
 
-# ===================== служебки =====================
+# -----------------------------------------------------------------------------
+# Сервисные вью (CSRF / AUTH)
+# -----------------------------------------------------------------------------
 
-OTP_ISSUER = getattr(settings, "OTP_ISSUER", "CafeApp")
-OTP_TTL_SECONDS = int(getattr(settings, "OTP_TTL_SECONDS", 300))  # 5 минут
-
-def _now_ts() -> int:
-    return int(datetime.now(dt_tz.utc).timestamp())
-
-def _otp_cache_key(user_id: int) -> str:
-    # будем хранить ВРЕМЯ_ИСТЕЧЕНИЯ, чтобы легко считать ttl_left
-    return f"otp_trusted_until:{user_id}"
-
-def _get_profile(user) -> Profile:
-    prof, _ = Profile.objects.get_or_create(user=user)
-    return prof
-
-def _ensure_secret(prof: Profile) -> Profile:
-    if not getattr(prof, "opt_key", None):
-        prof.opt_key = pyotp.random_base32()
-        prof.save(update_fields=["opt_key"])
-    return prof
-
-def _set_trusted(user_id: int):
-    until = _now_ts() + OTP_TTL_SECONDS
-    cache.set(_otp_cache_key(user_id), until, timeout=OTP_TTL_SECONDS)
-
-def _get_trusted_ttl(user_id: int) -> int:
-    until = cache.get(_otp_cache_key(user_id))
-    if not until:
-        return 0
-    ttl = int(until) - _now_ts()
-    return max(0, ttl)
-
-# ===================== CSRF & AUTH =====================
-
-@api_view(["GET"])
-@permission_classes([AllowAny])
 def csrf_view(request):
-    return Response({"csrfToken": get_token(request)})
+    token = get_token(request)
+    return JsonResponse({"csrfToken": token})
 
 @api_view(["POST"])
-@permission_classes([AllowAny])
 def auth_login(request):
-    username = (request.data.get("username") or request.data.get("login") or "").strip()
+    username = (request.data.get("username") or "").strip()
     password = request.data.get("password") or ""
     user = authenticate(request, username=username, password=password)
     if not user:
-        return Response({"detail": "Неверные логин/пароль"}, status=status.HTTP_400_BAD_REQUEST)
-    login(request, user)
-    return Response({"success": True})
+        return Response({"ok": False})
+    dj_login(request, user)
+    return Response({"ok": True})
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
 def auth_logout(request):
-    logout(request)
-    return Response({"success": True})
+    dj_logout(request)
+    return Response({"ok": True})
 
 @api_view(["GET"])
-@permission_classes([AllowAny])
 def auth_me(request):
-    if not request.user.is_authenticated:
-        return Response({"authenticated": False}, status=200)
-
     u = request.user
-    user_payload = {
+    if not u.is_authenticated:
+        return Response({"is_authenticated": False})
+    return Response({
+        "is_authenticated": True,
         "id": u.id,
-        "username": u.username,
-        "email": u.email,
+        "username": u.get_username(),
         "is_staff": u.is_staff,
         "is_superuser": u.is_superuser,
-    }
-    return Response({
-        "authenticated": True,
-        "user": user_payload,
-        "otp_ttl": _get_trusted_ttl(u.id),
     })
 
-# ===================== 2FA (TOTP на Profile.opt_key) =====================
+# -----------------------------------------------------------------------------
+# 2FA (TOTP)
+# -----------------------------------------------------------------------------
+
+OTP_TRUST_SECONDS = getattr(settings, "OTP_TRUST_SECONDS", 300)
+OTP_SESSION_KEY = "otp_ok_until"
+
+def _ensure_profile(user):
+    prof, _ = Profile.objects.get_or_create(user=user)
+    return prof
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
 def otp_status(request):
-    """
-    Совместимо с фронтом:
-      confirmed   — есть ли секрет (создан/привязан)
-      otp_good    — действует ли «доверенное» окно сейчас
-      ttl_seconds — остаток секунд доверенного окна
-    """
-    prof = _get_profile(request.user)
-    confirmed = bool(getattr(prof, "opt_key", None))
-    ttl = _get_trusted_ttl(request.user.id)
-    return Response({
-        "confirmed": confirmed,
-        "otp_good": ttl > 0,
-        "ttl_seconds": ttl,
-    })
+    ok_until = int(request.session.get(OTP_SESSION_KEY, 0))
+    ttl = max(0, ok_until - int(time.time()))
+    confirmed = False
+    if request.user.is_authenticated:
+        prof = _ensure_profile(request.user)
+        confirmed = bool(getattr(prof, "otp_secret", "") and getattr(prof, "otp_confirmed", False))
+    return Response({"otp_good": ttl > 0, "ttl_seconds": ttl, "confirmed": confirmed})
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
 def otp_secret(request):
-    """
-    Отдаёт секрет и otpauth_url.
-    Не перегенерирует, если уже есть.
-    """
-    prof = _ensure_secret(_get_profile(request.user))
-    totp = pyotp.TOTP(prof.opt_key)
-    otpauth_url = totp.provisioning_uri(name=(request.user.username or str(request.user.id)), issuer_name=OTP_ISSUER)
-    return Response({"secret": prof.opt_key, "otpauth_url": otpauth_url})
+    if not request.user.is_authenticated:
+        return Response({"detail": "auth required"}, status=403)
+    prof = _ensure_profile(request.user)
+    secret = pyotp.random_base32()
+    prof.otp_secret = secret
+    prof.otp_confirmed = False
+    prof.save(update_fields=["otp_secret", "otp_confirmed"])
+    uri = pyotp.TOTP(secret).provisioning_uri(
+        name=f"CafeApp:{request.user.username}", issuer_name="CafeApp"
+    )
+    return Response({"secret": secret, "otpauth_url": uri})
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
 def otp_login(request):
-    """
-    Принимает { key: "123456" }.
-    Проверяем код по opt_key; допускаем окно дрейфа ±1.
-    При успехе — ставим «доверенное» окно (TTL) в кэше.
-    """
-    raw = str(request.data.get("key") or "")
-    code = "".join(ch for ch in raw if ch.isdigit())[:6]
-    if len(code) != 6:
-        return Response({"success": False, "ttl_seconds": 0}, status=400)
-
-    prof = _ensure_secret(_get_profile(request.user))
-    ok = pyotp.TOTP(prof.opt_key).verify(code, valid_window=1)
-    if not ok:
-        return Response({"success": False, "ttl_seconds": 0}, status=400)
-
-    _set_trusted(request.user.id)
-    return Response({"success": True, "ttl_seconds": OTP_TTL_SECONDS})
+    if not request.user.is_authenticated:
+        return Response({"success": False})
+    code = (request.data.get("key") or "").strip()
+    prof = _ensure_profile(request.user)
+    if not getattr(prof, "otp_secret", ""):
+        return Response({"success": False})
+    totp = pyotp.TOTP(prof.otp_secret)
+    if not totp.verify(code, valid_window=1):
+        return Response({"success": False})
+    now = int(time.time())
+    request.session[OTP_SESSION_KEY] = now + int(OTP_TRUST_SECONDS)
+    request.session.save()
+    prof.otp_confirmed = True
+    prof.save(update_fields=["otp_confirmed"])
+    return Response({"success": True, "ttl_seconds": OTP_TRUST_SECONDS})
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
 def otp_reset(request):
-    """
-    Перепривязка: генерируем новый opt_key и сбрасываем доверие.
-    """
-    prof = _get_profile(request.user)
-    prof.opt_key = pyotp.random_base32()
-    prof.save(update_fields=["opt_key"])
-    cache.delete(_otp_cache_key(request.user.id))
-    totp = pyotp.TOTP(prof.opt_key)
-    otpauth_url = totp.provisioning_uri(name=(request.user.username or str(request.user.id)), issuer_name=OTP_ISSUER)
-    return Response({"secret": prof.opt_key, "otpauth_url": otpauth_url})
+    if not request.user.is_authenticated:
+        return Response({"detail": "auth required"}, status=403)
+    prof = _ensure_profile(request.user)
+    secret = pyotp.random_base32()
+    prof.otp_secret = secret
+    prof.otp_confirmed = False
+    prof.save(update_fields=["otp_secret", "otp_confirmed"])
+    uri = pyotp.TOTP(secret).provisioning_uri(
+        name=f"CafeApp:{request.user.username}", issuer_name="CafeApp"
+    )
+    if OTP_SESSION_KEY in request.session:
+        del request.session[OTP_SESSION_KEY]
+        request.session.save()
+    return Response({"secret": secret, "otpauth_url": uri})
 
-# ===================== CRUD ViewSets =====================
+# -----------------------------------------------------------------------------
+# CRUD ViewSets
+# -----------------------------------------------------------------------------
 
-class CategoryViewSet(viewsets.ModelViewSet):
+class CategoryViewSet(ModelViewSet):
     queryset = Category.objects.all().order_by("id")
     serializer_class = CategorySerializer
     permission_classes = [IsAdminOrReadOnly]
 
-class MenuViewSet(viewsets.ModelViewSet):
+class MenuViewSet(ModelViewSet):
     queryset = Menu.objects.select_related("group").all().order_by("id")
     serializer_class = MenuSerializer
     permission_classes = [IsAdminOrReadOnly]
 
-class CustomerViewSet(viewsets.ModelViewSet):
-    queryset = Customer.objects.all().order_by("-id")
+class CustomerViewSet(ModelViewSet):
+    queryset = Customer.objects.all().order_by("id")
     serializer_class = CustomerSerializer
     permission_classes = [AllowUserWriteOrAdminWithOTP]
 
-class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.select_related("customer", "user").prefetch_related("items").all().order_by("-id")
+class OrderViewSet(ModelViewSet):
+    queryset = (
+        Order.objects.select_related("customer")
+        .prefetch_related("items")
+        .all()
+        .order_by("id")
+    )
     serializer_class = OrderSerializer
-    permission_classes = [AllowUserWriteOrAdminWithOTP]
+    permission_classes = [IsOwnerOrAdmin | WriteRequiresOTP]
 
-    @action(detail=False, methods=["post"], url_path="add-to-cart", permission_classes=[IsAuthenticated])
-    def add_to_cart(self, request):
-        menu_id = request.data.get("menu_id")
-        qty = int(request.data.get("qty") or 1)
-        if not menu_id:
-            return Response({"detail": "menu_id is required"}, status=400)
-        menu_obj = get_object_or_404(Menu, pk=menu_id)
+    def get_queryset(self):
+        qs = super().get_queryset()
+        u = self.request.user
+        if u.is_authenticated and not (u.is_staff or u.is_superuser):
+            qs = qs.filter(customer__user=u)
+        return qs
 
-        # берём черновик текущего пользователя или создаём новый
-        order = Order.objects.filter(user=request.user, status="DRAFT").order_by("-id").first()
-        if order is None:
-            order = Order.objects.create(user=request.user, status="DRAFT")
+    @action(detail=False, methods=["post"], url_path="add-to-cart",
+            permission_classes=[IsAuthenticated | WriteRequiresOTP])
+    def add_to_cart(self, request, *args, **kwargs):
+        menu_id = int(request.data.get("menu_id") or 0)
+        qty = max(1, int(request.data.get("qty") or 1))
+        order_id = request.data.get("order_id")
+        new_order = bool(request.data.get("new_order"))
 
-        item, created = OrderItem.objects.get_or_create(order=order, menu=menu_obj, defaults={"qty": max(1, qty)})
-        if not created:
-            item.qty += max(1, qty)
-            item.save(update_fields=["qty"])
+        item_menu = get_object_or_404(Menu, id=menu_id)
 
-        return Response({"order_id": order.id, "item": OrderItemSerializer(item).data})
+        if order_id and not new_order:
+            order = get_object_or_404(Order, id=order_id)
+        else:
+            customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+            order = Order.objects.create(customer=customer, created_at=timezone.now())
 
-class OrderItemViewSet(viewsets.ModelViewSet):
-    queryset = OrderItem.objects.select_related("order", "menu").all().order_by("-id")
+        item = OrderItem.objects.create(order=order, menu=item_menu, qty=qty, price=getattr(item_menu, "price", 0))
+        return Response({
+            "order_id": order.id,
+            "item": OrderItemSerializer(item, context={"request": request}).data,
+        })
+
+class OrderItemViewSet(ModelViewSet):
+    queryset = OrderItem.objects.select_related("order", "menu").all().order_by("id")
     serializer_class = OrderItemSerializer
-    permission_classes = [AllowUserWriteOrAdminWithOTP]
+    permission_classes = [IsAuthenticated | WriteRequiresOTP]
 
-# ===================== Router =====================
+    @action(detail=False, methods=["get"], url_path="stats", url_name="stats")
+    def stats(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
+        aggr = qs.aggregate(count=Count("id"), avg=Avg("id"), max=Max("id"), min=Min("id"))
+        return Response({
+            "count": aggr.get("count") or 0,
+            "avg": aggr.get("avg") or 0,
+            "max": aggr.get("max") or 0,
+            "min": aggr.get("min") or 0,
+        })
 
+    @action(detail=False, methods=["get"], url_path="export", url_name="export")
+    def export(self, request, *args, **kwargs):
+        """
+        GET /api/order-items/export/?type=excel|word
+
+        Excel: CSV в UTF-8 с BOM (+ первая строка sep=;), CRLF — чтобы кириллица и
+        разделитель корректно открывались в Excel на Windows.
+        """
+        export_type = (request.query_params.get("type") or "excel").lower()
+        qs = self.filter_queryset(self.get_queryset())
+
+        rows = [("ID", "Заказ", "Позиция меню", "Кол-во")]
+        for it in qs:
+            rows.append((
+                it.id,
+                f"#{getattr(it.order, 'id', it.order_id)}",
+                getattr(it.menu, "name", None)
+                or getattr(it.menu, "title", None)
+                or f"#{getattr(it.menu, 'id', it.menu_id)}",
+                it.qty,
+            ))
+
+        if export_type == "excel":
+            # формируем CSV в памяти
+            s = StringIO()
+            s.write("sep=;\r\n")  # подсказка Excel про разделитель
+            writer = csv.writer(s, delimiter=";", lineterminator="\r\n")
+            for r in rows:
+                writer.writerow(["" if v is None else str(v) for v in r])
+
+            # добавляем BOM — Excel тогда считает UTF-8 правильно
+            data = s.getvalue().encode("utf-8-sig")
+            resp = HttpResponse(data, content_type="text/csv; charset=utf-8")
+            # заголовок с UTF-8 именем файла
+            resp["Content-Disposition"] = "attachment; filename=order_items.csv; filename*=UTF-8''order_items.csv"
+            return resp
+
+        if export_type == "word":
+            html = [
+                "<html><head><meta charset='utf-8'></head><body>",
+                "<h2>Позиции заказов</h2>",
+                "<table border='1' cellspacing='0' cellpadding='4'>",
+                "<tr>", "".join(f"<th>{c}</th>" for c in rows[0]), "</tr>",
+            ]
+            for r in rows[1:]:
+                html.extend(["<tr>", "".join(f"<td>{c}</td>" for c in r), "</tr>"])
+            html.append("</table></body></html>")
+            resp = HttpResponse("".join(html), content_type="application/msword; charset=utf-8")
+            resp["Content-Disposition"] = "attachment; filename=order_items.doc; filename*=UTF-8''order_items.doc"
+            return resp
+
+        return Response({"detail": "Unknown export type"}, status=400)
+
+# -----------------------------------------------------------------------------
+# Router
+# -----------------------------------------------------------------------------
 router = DefaultRouter()
-router.register(r"categories",  CategoryViewSet,  basename="category")
-router.register(r"menu",        MenuViewSet,      basename="menu")
-router.register(r"customers",   CustomerViewSet,  basename="customer")
-router.register(r"orders",      OrderViewSet,     basename="order")
-router.register(r"order-items", OrderItemViewSet, basename="orderitem")
+router.register(r"categories",   CategoryViewSet,  basename="categories")
+router.register(r"menu",         MenuViewSet,      basename="menu")
+router.register(r"customers",    CustomerViewSet,  basename="customers")
+router.register(r"orders",       OrderViewSet,     basename="orders")
+router.register(r"order-items",  OrderItemViewSet, basename="order-items")
