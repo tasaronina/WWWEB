@@ -1,8 +1,8 @@
 <template>
-  <div class="container my-4">
+  <div v-if="ready" class="container my-4">
     <h1 class="mb-3">Позиции меню</h1>
 
-    <!-- Режим добавления для пользователя -->
+    <!-- Пользовательский режим -->
     <div v-if="!canAdmin" class="alert alert-light border d-flex flex-wrap gap-3 align-items-center mb-3">
       <strong>Режим добавления:</strong>
       <div class="form-check form-check-inline">
@@ -16,7 +16,8 @@
 
       <div v-if="addMode==='one'" class="ms-auto d-flex align-items-center gap-2">
         <span class="small text-muted">
-          Текущий заказ: <strong>{{ currentOrderId ? ('#'+currentOrderId) : '— (создастся при добавлении)' }}</strong>
+          Текущий заказ:
+          <strong>{{ currentOrderId ? ('#'+currentOrderId) : '— (создастся при добавлении)' }}</strong>
         </span>
         <button class="btn btn-sm btn-outline-secondary" @click="startNewOrder">Начать новый</button>
       </div>
@@ -24,7 +25,7 @@
       <span class="text-muted small" v-if="flash">{{ flash }}</span>
     </div>
 
-    <!-- Добавить позицию (только админ) -->
+    <!-- Админ: форма добавления -->
     <div class="card mb-3" v-if="canAdmin">
       <div class="card-body">
         <h5 class="card-title mb-3">Добавить позицию</h5>
@@ -98,7 +99,9 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td :colspan="canAdmin ? 6 : 6" class="text-center text-muted">Загрузка…</td></tr>
+            <tr v-if="loading">
+              <td :colspan="canAdmin ? 6 : 6" class="text-center text-muted">Загрузка…</td>
+            </tr>
 
             <tr v-for="m in filteredMenu" :key="m.id">
               <td>{{ m.id }}</td>
@@ -116,9 +119,7 @@
                 <div class="d-flex gap-2 align-items-center">
                   <input type="number" min="1" class="form-control form-control-sm" style="max-width:90px"
                          v-model.number="qty[m.id]" @focus="initQty(m.id)">
-                  <button class="btn btn-sm btn-primary"
-                          :disabled="adding[m.id] === true"
-                          @click="addToCart(m.id)">
+                  <button class="btn btn-sm btn-primary" :disabled="adding[m.id]===true" @click="addToCart(m.id)">
                     {{ adding[m.id] ? "Добавляем..." : "Добавить" }}
                   </button>
                 </div>
@@ -140,7 +141,7 @@
       </div>
     </div>
 
-    <!-- Модалка редактирования (только админ) -->
+    <!-- Модалка редактирования -->
     <div class="modal fade" tabindex="-1" ref="editModalRef" v-if="canAdmin">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -192,204 +193,204 @@
         </div>
       </div>
     </div>
-
   </div>
+
+  <div v-else class="container my-5 text-center text-muted">Загрузка…</div>
 </template>
 
 <script setup>
-import {ref, computed, onMounted} from "vue"
-import "bootstrap/dist/js/bootstrap.bundle.min.js"
-import "@/styles/admin.css"
-import api, { ensureCsrf } from "@/api"
+import { ref, computed, onMounted } from "vue";
+import "bootstrap/dist/js/bootstrap.bundle.min.js";
+import "@/styles/admin.css";
+import axios from "axios";
 
-const canAdmin = ref(false)
-const addMode  = ref("one")
-const flash    = ref("")
-const currentOrderId = ref(null)   // ← сюда запоминаем «текущий заказ»
-const newOrderNext   = ref(false)  // ← флаг «следующее добавление создаёт новый заказ»
+axios.defaults.withCredentials = true;
+async function ensureCsrf(){ try{ await axios.get("/api/csrf/"); }catch{} }
 
-const categories = ref([])
-const menu = ref([])
-const loading = ref(false)
+/* UI */
+const ready = ref(false);
+const canAdmin = ref(false);
+const addMode  = ref("one");
+const flash    = ref("");
+const currentOrderId = ref(null);
+const newOrderNext   = ref(false);
 
-const filters = ref({ search:"", category:"" })
-const qty = ref({})
-const adding = ref({})
+/* Данные */
+const categories = ref([]);
+const menu = ref([]);
+const loading = ref(false);
 
-const createForm = ref({ name:"", group_id:null, price:0, file:null })
-const creating = ref(false)
+const filters = ref({ search:"", category:"" });
+const qty = ref({});
+const adding = ref({});
 
-const editModalRef = ref(null)
-let editModal = null
-const saving = ref(false)
-const editError = ref("")
+const createForm = ref({ name:"", group_id:null, price:0, file:null });
+const creating = ref(false);
+
+const editModalRef = ref(null);
+let editModal = null;
+const saving = ref(false);
+const editError = ref("");
 const editForm = ref({
   id:null, name:"", group_id:null, price:0, pictureUrl:null, file:null, preview:null, delete_picture:false
-})
+});
 
-function money(v){ return Number(v||0).toFixed(2) }
-function categoryName(id){ return categories.value.find(c=>c.id===id)?.name || "" }
-function initQty(id){ if(!qty.value[id] || qty.value[id] < 1) qty.value[id] = 1 }
-
-function startNewOrder(){
-  currentOrderId.value = null
-  newOrderNext.value = true
-  flash.value = "Новый заказ: добавьте первую позицию"
-  setTimeout(()=> flash.value = "", 1500)
-}
+/* helpers */
+function money(v){ return Number(v||0).toFixed(2); }
+function categoryName(id){ return categories.value.find(c=>c.id===id)?.name || ""; }
+function initQty(id){ if(!qty.value[id] || qty.value[id] < 1) qty.value[id] = 1; }
+function startNewOrder(){ currentOrderId.value = null; newOrderNext.value = true; flash.value = "Новый заказ: добавьте первую позицию"; setTimeout(()=> flash.value = "", 1500); }
 
 const filteredMenu = computed(()=>{
-  const q = filters.value.search.trim().toLowerCase()
-  const cat = filters.value.category
+  const q = filters.value.search.trim().toLowerCase();
+  const cat = filters.value.category;
   return menu.value.filter(m=>{
-    if(q && !(m.name||"").toLowerCase().includes(q)) return false
-    if(cat && String(m.group_id)!==cat) return false
-    return true
-  })
-})
+    if(q && !(m.name||"").toLowerCase().includes(q)) return false;
+    if(cat && String(m.group_id)!==cat) return false;
+    return true;
+  });
+});
 
 const stats = computed(()=>{
-  const arr = menu.value.map(m=>Number(m.price||0))
-  const total = menu.value.length
-  return { total, avg: total ? arr.reduce((a,b)=>a+b,0)/total : 0, max: arr.length ? Math.max(...arr) : 0, min: arr.length ? Math.min(...arr) : 0 }
-})
+  const arr = menu.value.map(m=>Number(m.price||0));
+  const total = menu.value.length;
+  return { total, avg: total ? arr.reduce((a,b)=>a+b,0)/total : 0, max: arr.length ? Math.max(...arr) : 0, min: arr.length ? Math.min(...arr) : 0 };
+});
 
-async function detectAdmin() {
-  try { const { data } = await api.get("/api/auth/me/"); canAdmin.value = !!(data?.is_staff || data?.is_superuser) }
-  catch { canAdmin.value = false }
+/* API */
+async function detectAdmin(){
+  try{
+    const { data } = await axios.get("/api/auth/me/");
+    canAdmin.value = !!(data?.is_staff || data?.is_superuser);
+  }catch{
+    canAdmin.value = false;
+  }
 }
 
-async function loadCategories(){ const {data} = await api.get("/api/categories/"); categories.value = data }
-async function loadMenu(){
-  loading.value = true
+async function loadCategories(){
   try{
-    const {data} = await api.get("/api/menu/")
-    menu.value = data.map(x=>{
+    const { data } = await axios.get("/api/categories/");
+    categories.value = Array.isArray(data) ? data : (data?.results ?? []);
+  }catch{
+    categories.value = [];
+  }
+}
+async function loadMenu(){
+  loading.value = true;
+  try{
+    const { data } = await axios.get("/api/menu/");
+    const list = Array.isArray(data) ? data : (data?.results ?? []);
+    menu.value = list.map(x=>{
       const groupId =
         x.group_id ??
         (x.group && typeof x.group === "object" ? x.group.id : x.group) ??
-        (x.category && typeof x.category === "object" ? x.category.id : x.category) ?? null
-      return { id:x.id, name:x.name ?? x.title ?? "", group_id: Number(groupId) || null, price:Number(x.price ?? 0), pictureUrl:x.picture || x.image || null }
-    })
-  } finally { loading.value = false }
+        (x.category && typeof x.category === "object" ? x.category.id : x.category) ?? null;
+      return {
+        id: x.id,
+        name: x.name ?? x.title ?? "",
+        group_id: Number(groupId) || null,
+        price: Number(x.price ?? 0),
+        pictureUrl: x.picture || x.image || null
+      };
+    });
+  } finally { loading.value = false; }
 }
 
-function onPickCreate(e){ createForm.value.file = e.target.files?.[0] || null }
+function onPickCreate(e){ createForm.value.file = e.target.files?.[0] || null; }
 async function onCreate(){
-  creating.value = true
+  creating.value = true;
   try{
-    await ensureCsrf()
-    const fd = new FormData()
-    fd.append("name", createForm.value.name)
+    await ensureCsrf();
+    const fd = new FormData();
+    fd.append("name", createForm.value.name);
     if(Number.isFinite(Number(createForm.value.group_id))){
-      fd.append("group_id", String(createForm.value.group_id))
-      fd.append("group", String(createForm.value.group_id))
-      fd.append("category", String(createForm.value.group_id))
+      fd.append("group_id", String(createForm.value.group_id));
+      fd.append("group", String(createForm.value.group_id));
+      fd.append("category", String(createForm.value.group_id));
     }
-    fd.append("price", String(Number(createForm.value.price||0)))
-    if(createForm.value.file){ fd.append("picture", createForm.value.file); fd.append("image", createForm.value.file) }
-    const {data} = await api.post("/api/menu/", fd, { headers:{ "Content-Type":"multipart/form-data" } })
+    fd.append("price", String(Number(createForm.value.price||0)));
+    if(createForm.value.file){ fd.append("picture", createForm.value.file); fd.append("image", createForm.value.file); }
+    const { data } = await axios.post("/api/menu/", fd, { headers:{ "Content-Type":"multipart/form-data" } });
     menu.value.push({
       id:data.id, name:data.name ?? createForm.value.name,
       group_id: data.group_id ?? (data.group?.id) ?? data.category ?? createForm.value.group_id ?? null,
       price:data.price ?? createForm.value.price, pictureUrl: data.picture || data.image || null
-    })
-    menu.value.sort((a,b)=>a.id-b.id)
-    createForm.value = { name:"", group_id:null, price:0, file:null }
-  } finally { creating.value = false }
+    });
+    menu.value.sort((a,b)=>a.id-b.id);
+    createForm.value = { name:"", group_id:null, price:0, file:null };
+  } finally { creating.value = false; }
 }
 
 function startEdit(m){
-  if(!editModal && editModalRef.value) editModal = window.bootstrap.Modal.getOrCreateInstance(editModalRef.value)
-  editError.value = ""
-  editForm.value = { id:m.id, name:m.name, group_id:m.group_id, price:Number(m.price||0), pictureUrl:m.pictureUrl, file:null, preview:null, delete_picture:false }
-  editModal?.show()
+  if(!editModal && editModalRef.value) editModal = window.bootstrap.Modal.getOrCreateInstance(editModalRef.value);
+  editError.value = "";
+  editForm.value = { id:m.id, name:m.name, group_id:m.group_id, price:Number(m.price||0), pictureUrl:m.pictureUrl, file:null, preview:null, delete_picture:false };
+  editModal?.show();
 }
 function onPickEdit(e){
-  const f = e.target.files?.[0] || null
-  editForm.value.file = f
-  editForm.value.preview = f ? URL.createObjectURL(f) : null
-  if(f) editForm.value.delete_picture = false
+  const f = e.target.files?.[0] || null;
+  editForm.value.file = f;
+  editForm.value.preview = f ? URL.createObjectURL(f) : null;
+  if(f) editForm.value.delete_picture = false;
 }
 async function saveEdit(){
-  saving.value = true
-  editError.value = ""
+  saving.value = true; editError.value = "";
   try{
-    await ensureCsrf()
-    const fd = new FormData()
-    fd.append("name", editForm.value.name)
+    await ensureCsrf();
+    const fd = new FormData();
+    fd.append("name", editForm.value.name);
     if(Number.isFinite(Number(editForm.value.group_id))){
-      fd.append("group_id", String(editForm.value.group_id))
-      fd.append("group", String(editForm.value.group_id))
-      fd.append("category", String(editForm.value.group_id))
+      fd.append("group_id", String(editForm.value.group_id));
+      fd.append("group", String(editForm.value.group_id));
+      fd.append("category", String(editForm.value.group_id));
     }
-    fd.append("price", String(Number(editForm.value.price || 0)))
-    if(editForm.value.file){ fd.append("picture", editForm.value.file); fd.append("image", editForm.value.file) }
-    if(editForm.value.delete_picture){ fd.append("delete_picture","1"); fd.append("remove_picture","1") }
-    const {data} = await api.patch(`/api/menu/${editForm.value.id}/`, fd, { headers:{ "Content-Type":"multipart/form-data" } })
-    const i = menu.value.findIndex(x=>x.id===editForm.value.id)
+    fd.append("price", String(Number(editForm.value.price || 0)));
+    if(editForm.value.file){ fd.append("picture", editForm.value.file); fd.append("image", editForm.value.file); }
+    if(editForm.value.delete_picture){ fd.append("delete_picture","1"); fd.append("remove_picture","1"); }
+    const { data } = await axios.patch(`/api/menu/${editForm.value.id}/`, fd, { headers:{ "Content-Type":"multipart/form-data" } });
+    const i = menu.value.findIndex(x=>x.id===editForm.value.id);
     if(i>-1){
       menu.value[i] = {
         id:data.id, name:data.name ?? editForm.value.name,
         group_id: data.group_id ?? (data.group?.id) ?? data.category ?? editForm.value.group_id ?? null,
         price:data.price ?? editForm.value.price,
         pictureUrl: data.picture || data.image || (editForm.value.delete_picture ? null : menu.value[i].pictureUrl)
-      }
-      menu.value.sort((a,b)=>a.id-b.id)
+      };
+      menu.value.sort((a,b)=>a.id-b.id);
     }
-    editModal?.hide()
-  } catch(e){ editError.value = "Не удалось сохранить. Проверь поля и файл изображения." }
-  finally { saving.value = false }
+    editModal?.hide();
+  } finally { saving.value = false; }
 }
 async function onDelete(id){
-  if(!confirm("Удалить позицию меню?")) return
-  await ensureCsrf()
-  await api.delete(`/api/menu/${id}/`)
-  menu.value = menu.value.filter(x=>x.id!==id)
+  if(!confirm("Удалить позицию меню?")) return;
+  await ensureCsrf();
+  await axios.delete(`/api/menu/${id}/`);
+  menu.value = menu.value.filter(x=>x.id!==id);
 }
 
-/* ----------- Пользователь: добавить в корзину ----------- */
+/* Пользователь: корзина */
 async function addToCart(menuId){
   if (adding.value[menuId]) return;
   adding.value[menuId] = true;
-  try {
+  try{
     initQty(menuId);
     const count = Math.max(1, Number(qty.value[menuId] || 1));
-
     await ensureCsrf();
-
     const payload = { menu_id: menuId, qty: count };
-
     if (addMode.value === "one") {
-      if (currentOrderId.value) {
-        payload.order_id = currentOrderId.value;          // добавляем строго в текущий
-      } else {
-        payload.new_order = true;                         // создаём новый для первой позиции
-      }
-      if (newOrderNext.value) payload.new_order = true;   // принудительно «новый» после нажатия кнопки
+      if (currentOrderId.value) payload.order_id = currentOrderId.value; else payload.new_order = true;
+      if (newOrderNext.value) payload.new_order = true;
     }
-
-    // «sep»: каждая позиция отдельным NEW заказом
-    if (addMode.value === "sep") {
-      payload.new_order = true;
-    }
-
-    const { data } = await api.post("/api/orders/add-to-cart/", payload);
-
-    const createdOrderId =
-      data?.order_id || data?.item?.order || data?.item?.order_id || data?.item?.order?.id || null;
-
+    if (addMode.value === "sep") payload.new_order = true;
+    const { data } = await axios.post("/api/orders/add-to-cart/", payload);
+    const createdOrderId = data?.order_id || data?.item?.order || data?.item?.order_id || data?.item?.order?.id || null;
     if (addMode.value === "one") {
-      if (!currentOrderId.value || newOrderNext.value) {
-        currentOrderId.value = createdOrderId;
-      }
+      if (!currentOrderId.value || newOrderNext.value) currentOrderId.value = createdOrderId;
       newOrderNext.value = false;
     } else {
-      // раздельный — не ведём текущий
       currentOrderId.value = null;
     }
-
-    flash.value = `Добавлено: #${menuId} × ${count}${createdOrderId ? " → заказ #" + createdOrderId : ""}`
+    flash.value = `Добавлено: #${menuId} × ${count}${createdOrderId ? " → заказ #" + createdOrderId : ""}`;
     qty.value[menuId] = 1;
     setTimeout(()=>{ flash.value = "" }, 1500);
   } finally {
@@ -397,9 +398,11 @@ async function addToCart(menuId){
   }
 }
 
+/* Инициализация */
 onMounted(async ()=>{
   await detectAdmin();
-  await Promise.all([loadCategories(), loadMenu()]);
+  await Promise.allSettled([ loadCategories(), loadMenu() ]);
+  ready.value = true;
 });
 </script>
 

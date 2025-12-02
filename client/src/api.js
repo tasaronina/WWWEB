@@ -1,56 +1,38 @@
-// Единая точка работы с API: CSRF + withCredentials + удобные функции
+import axios from "axios";
 
-import axiosBase from "axios";
-
-const axios = axiosBase.create({
-  baseURL: "",
+// ВАЖНО: используем ТОТ ЖЕ ХОСТ, что и у фронта (127.0.0.1), иначе кука сессии не поедет.
+export const api = axios.create({
+  baseURL: "http://127.0.0.1:8000",
   withCredentials: true,
+  headers: { "X-Requested-With": "XMLHttpRequest" },
 });
 
-// ---- CSRF helpers ----
 function getCookie(name) {
-  const m = document.cookie.match("(^|;)\\s*" + name + "\\s*=\\s*([^;]+)");
-  return m ? decodeURIComponent(m.pop()) : "";
+  if (typeof document === "undefined") return null;
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(";").shift();
+  return null;
 }
 
 export async function ensureCsrf() {
-  try {
-    await axios.get("/api/csrf/");
-  } catch {}
+  // получаем CSRF cookie и прокидываем в заголовки
+  await api.get("/api/csrf/");
+  const csrftoken = getCookie("csrftoken");
+  if (csrftoken) api.defaults.headers.common["X-CSRFToken"] = csrftoken;
 }
 
-// автоматически подставляем X-CSRFToken
-axios.interceptors.request.use((config) => {
-  const method = (config.method || "get").toLowerCase();
-  if (["post", "put", "patch", "delete"].includes(method)) {
-    const token = getCookie("csrftoken");
-    if (token) config.headers["X-CSRFToken"] = token;
-  }
-  return config;
-});
-
-// ---- API calls ----
-export async function apiMe() {
-  const { data } = await axios.get("/api/auth/me/");
-  return data || {};
-}
-
-export async function apiLogin(username, password) {
+export async function login(username, password) {
   await ensureCsrf();
-  const payload = { username, password };
-  // сервер допускает и login, и username — отправим оба
-  payload.login = username;
-  await axios.post("/api/auth/login/", payload);
+  await api.post("/api/auth/login/", { username, password });
+  // Сразу проверяем, приклеилась ли сессия
+  const { data } = await api.get("/api/auth/me/");
+  return data; // { authenticated, user, otp_ttl }
 }
 
-export async function apiLogout() {
+export async function logout() {
   await ensureCsrf();
-  await axios.post("/api/auth/logout/", {});
+  await api.post("/api/auth/logout/");
 }
 
-// Нужен для старых импортов, чтобы не падало
-export async function downloadExport() {
-  /* заглушка — ничего не делает */
-}
-
-export default axios;
+export default api;

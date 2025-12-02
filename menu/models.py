@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings  # использовать актуальную модель пользователя
 
 
 class Category(models.Model):
@@ -22,11 +23,11 @@ class Menu(models.Model):
         related_name="menus",
     )
     price = models.DecimalField("Цена", max_digits=10, decimal_places=2, default=0)
-    picture = models.ImageField("Изображение", null=True, upload_to="menus")
+    picture = models.ImageField("Изображение", upload_to="menus", null=True, blank=True)
 
     class Meta:
-        verbose_name = "Меню"
-        verbose_name_plural = "Меню"
+        verbose_name = "Позиция меню"
+        verbose_name_plural = "Позиции меню"
 
     def __str__(self) -> str:
         return self.name
@@ -34,10 +35,14 @@ class Menu(models.Model):
 
 class Customer(models.Model):
     name = models.TextField("Имя")
-    phone = models.TextField("Телефон", null=True)
-    picture = models.ImageField("Аватар", null=True, upload_to="customers")
+    phone = models.TextField("Телефон", null=True, blank=True)
+    picture = models.ImageField("Аватар", upload_to="customers", null=True, blank=True)
     user = models.ForeignKey(
-        "auth.User", on_delete=models.CASCADE, null=True, verbose_name="Пользователь"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="Пользователь",
     )
 
     class Meta:
@@ -50,6 +55,7 @@ class Customer(models.Model):
 
 class Order(models.Model):
     STATUS_CHOICES = [
+        ("DRAFT", "Черновик"),      # корзина/незавершённый заказ
         ("NEW", "Новый"),
         ("IN_PROGRESS", "В работе"),
         ("DONE", "Готов"),
@@ -57,20 +63,31 @@ class Order(models.Model):
     ]
 
     customer = models.ForeignKey(
-        Customer, on_delete=models.CASCADE, verbose_name="Клиент", related_name="orders"
+        Customer,
+        on_delete=models.CASCADE,
+        verbose_name="Клиент",
+        related_name="orders",
+        null=True,
+        blank=True,                 # ← можно создать заказ без выбранного клиента
     )
     created_at = models.DateTimeField("Создан", auto_now_add=True)
-    status = models.TextField("Статус", choices=STATUS_CHOICES, default="NEW")
+    status = models.CharField("Статус", choices=STATUS_CHOICES, default="DRAFT", max_length=20)
     user = models.ForeignKey(
-        "auth.User", on_delete=models.CASCADE, null=True, verbose_name="Пользователь"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="Пользователь",
+        related_name="orders",
     )
 
     class Meta:
         verbose_name = "Заказ"
         verbose_name_plural = "Заказы"
+        ordering = ("-id",)
 
     def __str__(self) -> str:
-        return f"Заказ #{self.pk}"
+        return f"Заказ #{self.pk or ''}".strip()
 
 
 class OrderItem(models.Model):
@@ -82,7 +99,8 @@ class OrderItem(models.Model):
         on_delete=models.PROTECT,
         verbose_name="Позиция меню",
         related_name="order_items",
-        null=True,
+        null=True,                  # оставляем как было у тебя, чтобы не ломать миграции
+        blank=True,
     )
     qty = models.PositiveIntegerField("Количество", default=1)
 
@@ -91,27 +109,31 @@ class OrderItem(models.Model):
         verbose_name_plural = "Позиции заказа"
 
     def __str__(self) -> str:
-        return f"{self.menu} x {self.qty}"
-
+        return f"{self.menu} × {self.qty}"
 
 
 class Profile(models.Model):
-    user = models.OneToOneField(
-        "auth.User", on_delete=models.CASCADE, related_name="profile", verbose_name="Пользователь"
+    ROLE_USER = "USER"
+    ROLE_ADMIN = "ADMIN"
+    ROLE_CHOICES = (
+        (ROLE_USER, "Пользователь"),
+        (ROLE_ADMIN, "Админ"),
     )
-    ROLE_CHOICES = [
-        ("USER", "Пользователь"),
-        ("ADMIN", "Администратор"),
-    ]
-    role = models.CharField("Роль", max_length=16, choices=ROLE_CHOICES, default="USER")
 
-    
-    twofa_passed = models.BooleanField("2FA пройдена", default=False)
-    twofa_expires_at = models.DateTimeField("2FA истекает", null=True, blank=True)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="profile",
+        verbose_name="Пользователь",
+    )
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=ROLE_USER)
+
+    # Секрет для TOTP (2FA)
+    opt_key = models.CharField("OTP-секрет", max_length=64, blank=True, null=True)
 
     class Meta:
         verbose_name = "Профиль"
         verbose_name_plural = "Профили"
 
     def __str__(self):
-        return f"Профиль {self.user.username}"
+        return f"Profile<{self.user.username}>"

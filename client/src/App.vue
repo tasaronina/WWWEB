@@ -1,67 +1,111 @@
-<!-- client/src/App.vue -->
 <template>
-  <!-- Скрываем шапку на странице логина -->
-  <header v-if="!isLogin" class="navbar navbar-light bg-white border-bottom mb-3">
-    <div class="container d-flex align-items-center justify-content-between">
-      <router-link class="navbar-brand fw-semibold text-decoration-none" to="/menu">
-        Кофейня
-      </router-link>
+  <div>
+    <!-- шапка скрыта на /login -->
+    <header v-if="route.path !== '/login'" class="border-bottom bg-white">
+      <div class="container d-flex align-items-center justify-content-between py-2">
+        <!-- Бренд -->
+        <RouterLink :to="{name:'menu'}" class="text-decoration-none fw-semibold text-dark">
+          Кофейня
+        </RouterLink>
 
-      <nav class="d-flex gap-4 align-items-center">
-        <router-link class="nav-link" to="/menu">Меню</router-link>
+        <!-- Навигация -->
+        <nav class="d-flex align-items-center gap-3">
+          <RouterLink
+            :to="{name:'menu'}"
+            class="btn btn-link px-2 py-1"
+            :class="{ 'fw-semibold': route.name === 'menu' }"
+          >
+            Меню
+          </RouterLink>
 
-        <!-- У админа — админ-пункты; у обычного — 'Мои заказы' -->
-        <template v-if="isAdmin">
-          <router-link class="nav-link" to="/categories">Категории</router-link>
-          <router-link class="nav-link" to="/customers">Клиенты</router-link>
-          <router-link class="nav-link" to="/orders">Заказы (админ)</router-link>
-          <router-link class="nav-link" to="/order-items">Позиции заказов</router-link>
-        </template>
-        <router-link v-else class="nav-link" to="/my-orders">Мои заказы</router-link>
+          <!-- пользователь -->
+          <RouterLink
+            v-if="store.isAuthed && !isAdmin"
+            :to="{name:'my-orders'}"
+            class="btn btn-link px-2 py-1"
+            :class="{ 'fw-semibold': route.name === 'my-orders' }"
+          >
+            Мои заказы
+          </RouterLink>
 
-        <!-- Правый угол: ник и кнопка -->
+          <!-- админ -->
+          <RouterLink
+            v-if="store.isAuthed && isAdmin"
+            :to="{name:'orders'}"
+            class="btn btn-link px-2 py-1"
+            :class="{ 'fw-semibold': route.name === 'orders' }"
+          >
+            Заказы (админ)
+          </RouterLink>
+          <RouterLink
+            v-if="store.isAuthed && isAdmin"
+            :to="{name:'categories'}"
+            class="btn btn-link px-2 py-1"
+            :class="{ 'fw-semibold': route.name === 'categories' }"
+          >
+            Категории
+          </RouterLink>
+          <RouterLink
+            v-if="store.isAuthed && isAdmin"
+            :to="{name:'customers'}"
+            class="btn btn-link px-2 py-1"
+            :class="{ 'fw-semibold': route.name === 'customers' }"
+          >
+            Клиенты
+          </RouterLink>
+          <RouterLink
+            v-if="store.isAuthed && isAdmin"
+            :to="{name:'order-items'}"
+            class="btn btn-link px-2 py-1"
+            :class="{ 'fw-semibold': route.name === 'order-items' }"
+          >
+            Позиции заказов
+          </RouterLink>
+        </nav>
+
+        <!-- Имя + вход/выход -->
         <div class="d-flex align-items-center gap-3">
-          <span v-if="isAuth" class="text-muted">{{ username }}</span>
+          <span v-if="store.isAuthed" class="text-muted">{{ store.username }}</span>
+
           <button
-            v-if="isAuth"
+            v-if="store.isAuthed"
+            type="button"
             class="btn btn-outline-primary btn-sm"
             @click="onLogout"
           >
             Выйти
           </button>
-          <router-link v-else class="btn btn-outline-primary btn-sm" to="/login">
-            Войти
-          </router-link>
-        </div>
-      </nav>
-    </div>
-  </header>
 
-  <router-view />
+          <RouterLink v-else :to="{name:'login'}" class="btn btn-outline-primary btn-sm">
+            Войти
+          </RouterLink>
+        </div>
+      </div>
+    </header>
+
+    <RouterView :key="route.fullPath" />
+  </div>
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { useUserStore } from "@/stores/user";
 
-const route = useRoute();
 const store = useUserStore();
+const route = useRoute();
 
-const isLogin = computed(() => route.path === "/login");
-const isAuth = computed(() => store.isAuth);
-const isAdmin = computed(() => store.isAdmin);
-const username = computed(() => store.username);
+onMounted(() => {
+  if (!store.ready) store.restore().catch(() => {});
+});
 
-async function onLogout() {
-  await store.logout(); // внутри стор сразу делает router.replace("/login")
+const isAdmin = computed(() => Boolean(store.user?.is_staff || store.user?.is_superuser));
+
+function onLogout() {
+  store.logout();
 }
 </script>
 
 <style scoped>
-.nav-link.router-link-active {
-  padding: .35rem .8rem;
-  border-radius: .6rem;
-  background: #eef4ff;
-}
+.fw-semibold { font-weight: 600; }
 </style>

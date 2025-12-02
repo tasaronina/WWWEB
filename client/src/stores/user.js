@@ -1,54 +1,56 @@
 import { defineStore } from "pinia";
-import { apiMe, apiLogin, apiLogout } from "@/api";
+import api, { ensureCsrf } from "@/api";
 
 export const useUserStore = defineStore("user", {
   state: () => ({
-    me: null,
-    initialized: false,
-    loading: false,
+    // базовое состояние
+    ready: false,          // для совместимости с твоим App.vue
+    initialized: false,    // внутренний флаг
+    authenticated: false,
+    user: null,
+    otp_ttl: 0,
   }),
-
   getters: {
-    isAuth: (s) => !!(s.me && s.me.id),
-    isAdmin: (s) => !!(s.me && (s.me.is_staff || s.me.is_superuser)),
-    username: (s) => s.me?.username ?? "",
+    isAuthed(state) {
+      return !!state.authenticated;
+    },
+    isAdmin(state) {
+      return !!state.user?.is_staff || !!state.user?.is_superuser;
+    },
+    username(state) {
+      return state.user?.username || state.user?.email || "";
+    },
   },
-
   actions: {
-    // Восстановление сессии при старте приложения/перезагрузке
-    async restore(force = false) {
-      if (this.initialized && !force) return;
-      this.loading = true;
-      try {
-        const data = await apiMe();
-        this.me = data?.is_authenticated
-          ? {
-              id: data.id,
-              username: data.username,
-              is_staff: !!data.is_staff,
-              is_superuser: !!data.is_superuser,
-            }
-          : null;
-      } finally {
-        this.initialized = true;
-        this.loading = false;
-      }
+    async fetchMe() {
+      const { data } = await api.get("/api/auth/me/");
+      this.authenticated = !!data?.authenticated;
+      this.user = data?.user || null;
+      this.otp_ttl = Number(data?.otp_ttl || 0);
+      this.initialized = true;
+      this.ready = true;    // совместимость с твоим кодом
+      return data;
     },
 
-    // Логин
+    // алиас для твоего App.vue
+    async restore() {
+      return await this.fetchMe();
+    },
+
     async login(username, password) {
-      await apiLogin(username, password);
-      await this.restore(true);
+      await ensureCsrf();
+      await api.post("/api/auth/login/", { username, password });
+      return await this.fetchMe(); // здесь authenticated уже true
     },
 
-    // Логаут + мгновенный редирект на /login
     async logout() {
-      try { await apiLogout(); } catch { /* игнор сетевых ошибок */ }
-      this.me = null;
-      this.initialized = false;
-
-      // ВАЖНО: убираем защищённую страницу из истории и переходим на логин
-      window.location.replace("/login");
+      await ensureCsrf();
+      await api.post("/api/auth/logout/");
+      this.authenticated = false;
+      this.user = null;
+      this.otp_ttl = 0;
+      this.ready = true;
+      this.initialized = true;
     },
   },
 });

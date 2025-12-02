@@ -1,38 +1,86 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useUserStore } from "@/stores/user";
 
-const LoginPage      = () => import("@/components/auth/LoginPage.vue");
-const MenuPage       = () => import("@/components/menu/MenuPage.vue");
-const MyOrdersPage   = () => import("@/components/orders/MyOrdersPage.vue");
-const CategoriesPage = () => import("@/components/categories/CategoriesPage.vue");
-const CustomersPage  = () => import("@/components/customers/CustomersPage.vue");
-const OrdersPage     = () => import("@/components/orders/OrdersPage.vue");
-const OrderItemsPage = () => import("@/components/order-items/OrderItemsPage.vue");
+const routes = [
+  {
+    path: "/login",
+    name: "login",
+    component: () => import("@/components/auth/LoginPage.vue"),
+    meta: { public: true },
+  },
+
+  // пользовательские страницы
+  {
+    path: "/menu",
+    name: "menu",
+    component: () => import("@/components/menu/MenuPage.vue"),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/my-orders",
+    name: "my-orders",
+    component: () => import("@/components/orders/MyOrdersPage.vue"),
+    meta: { requiresAuth: true },
+  },
+
+  // админские страницы
+  {
+    path: "/orders",
+    name: "orders",
+    component: () => import("@/components/orders/OrdersPage.vue"),
+    meta: { requiresAuth: true, adminOnly: true },
+  },
+  {
+    path: "/categories",
+    name: "categories",
+    component: () => import("@/components/categories/CategoriesPage.vue"),
+    meta: { requiresAuth: true, adminOnly: true },
+  },
+  {
+    path: "/customers",
+    name: "customers",
+    component: () => import("@/components/customers/CustomersPage.vue"),
+    meta: { requiresAuth: true, adminOnly: true },
+  },
+  {
+    path: "/order-items",
+    name: "order-items",
+    component: () => import("@/components/order-items/OrderItemsPage.vue"),
+    meta: { requiresAuth: true, adminOnly: true },
+  },
+
+  { path: "/", redirect: { name: "menu" } },
+];
 
 const router = createRouter({
   history: createWebHistory(),
-  routes: [
-    { path: "/", redirect: "/menu" },
-    { path: "/login", name: "login", component: LoginPage, meta: { guestOnly: true } },
-    { path: "/menu", name: "menu", component: MenuPage, meta: { requiresAuth: true } },
-    { path: "/my-orders", name: "my-orders", component: MyOrdersPage, meta: { requiresAuth: true } },
-
-    { path: "/categories", name: "categories", component: CategoriesPage, meta: { requiresAuth: true, adminOnly: true } },
-    { path: "/customers",  name: "customers",  component: CustomersPage,  meta: { requiresAuth: true, adminOnly: true } },
-    { path: "/orders",     name: "orders",     component: OrdersPage,     meta: { requiresAuth: true, adminOnly: true } },
-    { path: "/order-items",name: "order-items",component: OrderItemsPage, meta: { requiresAuth: true, adminOnly: true } },
-  ],
+  routes,
 });
 
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to) => {
   const store = useUserStore();
-  if (!store.initialized) {
+
+  if (!store.ready) {
     try { await store.restore(); } catch {}
   }
-  if (to.meta.requiresAuth && !store.isAuth) return next({ name: "login", query: { redirect: to.fullPath } });
-  if (to.meta.guestOnly && store.isAuth)     return next({ name: "menu" });
-  if (to.meta.adminOnly && !store.isAdmin)   return next({ name: "menu" });
-  next();
+
+  if (to.meta?.public) {
+    if (store.isAuthed) {
+      const next = (to.query?.next && String(to.query.next)) || "/menu";
+      return next;
+    }
+    return true;
+  }
+
+  if (to.meta?.requiresAuth && !store.isAuthed) {
+    return { name: "login", query: { next: to.fullPath || "/menu" } };
+  }
+
+  if (to.meta?.adminOnly && !store.isAdmin) {
+    return { name: "menu" };
+  }
+
+  return true;
 });
 
 export default router;

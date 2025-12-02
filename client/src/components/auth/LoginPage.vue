@@ -1,66 +1,87 @@
 <template>
-  <div class="container py-5">
-    <div class="row justify-content-center">
-      <div class="col-12 col-sm-10 col-md-8 col-lg-6 col-xl-5">
-        <div class="card shadow-sm">
-          <div class="card-body p-4">
-            <h1 class="h2 text-center mb-2">Вход</h1>
-            <p class="text-muted text-center mb-4">Введите логин и пароль</p>
+  <div class="container py-5" style="max-width: 520px;">
+    <h1 class="mb-2 text-center">Вход</h1>
+    <p class="text-muted text-center mb-4">Введите логин и пароль</p>
 
-            <div v-if="error" class="alert alert-danger">{{ error }}</div>
+    <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
-            <form @submit.prevent="onSubmit" autocomplete="on">
-              <div class="mb-3">
-                <label class="form-label">Логин</label>
-                <input v-model.trim="username" type="text" class="form-control" required autofocus />
-              </div>
-
-              <div class="mb-4">
-                <label class="form-label">Пароль</label>
-                <input v-model="password" type="password" class="form-control" required />
-              </div>
-
-              <button class="btn btn-primary w-100" type="submit" :disabled="loading">
-                {{ loading ? "Входим..." : "Войти" }}
-              </button>
-            </form>
-          </div>
-        </div>
+    <form @submit.prevent="onSubmit" class="card p-4 shadow-sm">
+      <div class="mb-3">
+        <label class="form-label">Логин</label>
+        <input v-model.trim="username" class="form-control" autocomplete="username" required />
       </div>
-    </div>
+
+      <div class="mb-4">
+        <label class="form-label">Пароль</label>
+        <input v-model="password" type="password" class="form-control" autocomplete="current-password" required />
+      </div>
+
+      <button class="btn btn-primary w-100" :disabled="loading">
+        {{ loading ? "Входим..." : "Войти" }}
+      </button>
+    </form>
+
+    <!-- Модалка 2FA -->
+    <OtpModal ref="otpRef" @success="onOtpSuccess" />
   </div>
 </template>
 
 <script setup>
 import { ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 import { useUserStore } from "@/stores/user";
+import api from "@/api";
+import OtpModal from "@/components/auth/OtpModal.vue";
 
 const router = useRouter();
-const route  = useRoute();
-const store  = useUserStore();
+const route = useRoute();
+const store = useUserStore();
 
 const username = ref("");
 const password = ref("");
-const loading  = ref(false);
-const error    = ref("");
+const loading = ref(false);
+const error = ref("");
+
+const otpRef = ref(null);
+let pendingNext = "/menu";
+
+function getNextPath() {
+  const qnext = route.query?.next;
+  return (qnext && String(qnext)) || "/menu";
+}
 
 async function onSubmit() {
   error.value = "";
   loading.value = true;
   try {
-    // 1) пытаемся войти
-    await store.login(username.value, password.value).catch(() => {});
-    // 2) ОБЯЗАТЕЛЬНО сверяемся с сервером — действительно ли авторизованы
-    await store.restore(true);
+    // логинимся и обновляем store
+    const me = await store.login(username.value, password.value);
+    if (!me?.authenticated) throw new Error("not-auth");
 
-    if (store.isAuth) {
-      const redirect = (route.query.redirect && String(route.query.redirect)) || "/menu";
-      return router.replace(redirect);
+    // после логина проверяем статус 2FA
+    const { data: st } = await api.get("/api/2fa/otp-status/");
+    const confirmed = !!st?.confirmed;
+    const ttl = Number(st?.ttl_seconds || 0);
+
+    pendingNext = getNextPath();
+
+    // если ещё не подтверждено ИЛИ доверенное окно истекло — просим код
+    if (!confirmed || ttl <= 0) {
+      otpRef.value?.show();
+      return; // останемся на /login до успешного ввода
     }
+
+    // 2FA ок — идём на next
+    router.replace(pendingNext);
+  } catch (e) {
     error.value = "Не удалось войти. Проверьте логин и пароль.";
   } finally {
     loading.value = false;
   }
+}
+
+function onOtpSuccess() {
+  // после ввода верного кода — на next
+  router.replace(pendingNext || "/menu");
 }
 </script>
