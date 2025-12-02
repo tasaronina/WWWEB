@@ -1,4 +1,3 @@
-
 from io import StringIO
 import csv
 import time
@@ -9,13 +8,15 @@ from django.middleware.csrf import get_token
 from django.utils import timezone
 from django.contrib.auth import authenticate, login as dj_login, logout as dj_logout
 from django.conf import settings
-from django.db.models import Avg, Max, Min, Count, Q
+from django.views.decorators.csrf import csrf_exempt
 
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.response import Response
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.routers import DefaultRouter
+
+from django.db.models import Avg, Max, Min, Count
 
 import pyotp
 
@@ -34,26 +35,31 @@ from .permissions import (
     IsOwnerOrAdmin,
 )
 
-
 def csrf_view(request):
-    return JsonResponse({"csrfToken": get_token(request)})
+    token = get_token(request)
+    return JsonResponse({"csrfToken": token})
 
+@csrf_exempt
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def auth_login(request):
     username = (request.data.get("username") or "").strip()
     password = request.data.get("password") or ""
     user = authenticate(request, username=username, password=password)
     if not user:
-        return Response({"ok": False})
+        return Response({"ok": False}, status=400)
     dj_login(request, user)
     return Response({"ok": True})
 
+@csrf_exempt
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def auth_logout(request):
     dj_logout(request)
     return Response({"ok": True})
 
 @api_view(["GET"])
+@permission_classes([AllowAny])
 def auth_me(request):
     u = request.user
     if not u.is_authenticated:
@@ -66,10 +72,7 @@ def auth_me(request):
         "is_superuser": u.is_superuser,
     })
 
-
-
-OTP_TRUST_SECONDS = getattr(settings, "OTP_TRUST_SECONDS",
-                            getattr(settings, "OTP_TRUST_TTL_SECONDS", 300))
+OTP_TRUST_SECONDS = getattr(settings, "OTP_TRUST_SECONDS", 300)
 OTP_SESSION_KEY = "otp_ok_until"
 
 def _ensure_profile(user):
@@ -83,7 +86,7 @@ def otp_status(request):
     confirmed = False
     if request.user.is_authenticated:
         prof = _ensure_profile(request.user)
-        confirmed = bool(getattr(prof, "opt_key", None))
+        confirmed = bool(getattr(prof, "opt_key", ""))
     return Response({"otp_good": ttl > 0, "ttl_seconds": ttl, "confirmed": confirmed})
 
 @api_view(["GET"])
@@ -92,7 +95,6 @@ def otp_secret(request):
         return Response({"detail": "auth required"}, status=403)
     prof = _ensure_profile(request.user)
     secret = pyotp.random_base32()
-   
     prof.opt_key = secret
     prof.save(update_fields=["opt_key"])
     uri = pyotp.TOTP(secret).provisioning_uri(
@@ -106,12 +108,11 @@ def otp_login(request):
         return Response({"success": False})
     code = (request.data.get("key") or "").strip()
     prof = _ensure_profile(request.user)
-    secret = getattr(prof, "opt_key", None)
-    if not secret:
+    if not getattr(prof, "opt_key", ""):
         return Response({"success": False})
-    totp = pyotp.TOTP(secret)
+    totp = pyotp.TOTP(prof.opt_key)
     if not totp.verify(code, valid_window=1):
-        return Response({"success": False})
+        return Response({"success": False}, status=400)
     now = int(time.time())
     request.session[OTP_SESSION_KEY] = now + int(OTP_TRUST_SECONDS)
     request.session.save()
@@ -123,7 +124,6 @@ def otp_reset(request):
         return Response({"detail": "auth required"}, status=403)
     prof = _ensure_profile(request.user)
     secret = pyotp.random_base32()
-    # фикс: opt_key вместо несуществующих полей
     prof.opt_key = secret
     prof.save(update_fields=["opt_key"])
     uri = pyotp.TOTP(secret).provisioning_uri(
@@ -133,8 +133,6 @@ def otp_reset(request):
         del request.session[OTP_SESSION_KEY]
         request.session.save()
     return Response({"secret": secret, "otpauth_url": uri})
-
-# --- CRUD ViewSets ---
 
 class CategoryViewSet(ModelViewSet):
     queryset = Category.objects.all().order_by("id")
@@ -153,22 +151,20 @@ class CustomerViewSet(ModelViewSet):
 
 class OrderViewSet(ModelViewSet):
     queryset = (
-        Order.objects.select_related("customer", "user")
-        .prefetch_related("items", "items__menu")
+        Order.objects.select_related("customer")
+        .prefetch_related("items")
         .all()
-        .order_by("-id")
+        .order_by("id")
     )
     serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsOwnerOrAdmin | WriteRequiresOTP]
 
     def get_queryset(self):
         qs = super().get_queryset()
         u = self.request.user
-        if not u.is_authenticated:
-            return qs.none()
-        if u.is_staff or u.is_superuser:
-            return qs
-        return qs.filter(Q(user=u) | Q(customer__user=u))
+        if u.is_authenticated and not (u.is_staff or u.is_superuser):
+            qs = qs.filter(customer__user=u)
+        return qs
 
     @action(detail=False, methods=["post"], url_path="add-to-cart",
             permission_classes=[IsAuthenticated | WriteRequiresOTP])
@@ -182,7 +178,7 @@ class OrderViewSet(ModelViewSet):
             order = get_object_or_404(Order, id=order_id)
         else:
             customer = Customer.objects.filter(user=request.user).first() if request.user.is_authenticated else None
-            order = Order.objects.create(customer=customer, user=request.user, created_at=timezone.now())
+            order = Order.objects.create(customer=customer, created_at=timezone.now())
         item = OrderItem.objects.create(order=order, menu=item_menu, qty=qty, price=getattr(item_menu, "price", 0))
         return Response({
             "order_id": order.id,
@@ -192,16 +188,7 @@ class OrderViewSet(ModelViewSet):
 class OrderItemViewSet(ModelViewSet):
     queryset = OrderItem.objects.select_related("order", "menu").all().order_by("id")
     serializer_class = OrderItemSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        u = self.request.user
-        if not u.is_authenticated:
-            return qs.none()
-        if u.is_staff or u.is_superuser:
-            return qs
-        return qs.filter(Q(order__user=u) | Q(order__customer__user=u))
+    permission_classes = [IsAuthenticated | WriteRequiresOTP]
 
     @action(detail=False, methods=["get"], url_path="stats", url_name="stats")
     def stats(self, request, *args, **kwargs):
@@ -252,7 +239,6 @@ class OrderItemViewSet(ModelViewSet):
             resp["Content-Disposition"] = "attachment; filename=order_items.doc; filename*=UTF-8''order_items.doc"
             return resp
         return Response({"detail": "Unknown export type"}, status=400)
-
 
 router = DefaultRouter()
 router.register(r"categories",   CategoryViewSet,  basename="categories")
