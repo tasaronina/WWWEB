@@ -36,7 +36,7 @@ class OrderAdmin(admin.ModelAdmin):
     list_filter = ("status",)
     date_hierarchy = "created_at"
     autocomplete_fields = ("user", "customer")
-    # НУЖНО для автокомплита из OrderItemAdmin по полю order:
+    
     search_fields = ("id", "customer__name", "user__username")
 
 
@@ -44,7 +44,7 @@ class OrderAdmin(admin.ModelAdmin):
 class OrderItemAdmin(admin.ModelAdmin):
     list_display = ("id", "order", "menu", "qty")
     list_filter = ("order", "menu")
-    # Чтобы работал автокомплит, у связанных админов должны быть search_fields
+   
     autocomplete_fields = ("order", "menu")
 
 

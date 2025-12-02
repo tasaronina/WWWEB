@@ -1,86 +1,41 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useUserStore } from "@/stores/user";
 
-const routes = [
-  {
-    path: "/login",
-    name: "login",
-    component: () => import("@/components/auth/LoginPage.vue"),
-    meta: { public: true },
-  },
-
-  // пользовательские страницы
-  {
-    path: "/menu",
-    name: "menu",
-    component: () => import("@/components/menu/MenuPage.vue"),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: "/my-orders",
-    name: "my-orders",
-    component: () => import("@/components/orders/MyOrdersPage.vue"),
-    meta: { requiresAuth: true },
-  },
-
-  // админские страницы
-  {
-    path: "/orders",
-    name: "orders",
-    component: () => import("@/components/orders/OrdersPage.vue"),
-    meta: { requiresAuth: true, adminOnly: true },
-  },
-  {
-    path: "/categories",
-    name: "categories",
-    component: () => import("@/components/categories/CategoriesPage.vue"),
-    meta: { requiresAuth: true, adminOnly: true },
-  },
-  {
-    path: "/customers",
-    name: "customers",
-    component: () => import("@/components/customers/CustomersPage.vue"),
-    meta: { requiresAuth: true, adminOnly: true },
-  },
-  {
-    path: "/order-items",
-    name: "order-items",
-    component: () => import("@/components/order-items/OrderItemsPage.vue"),
-    meta: { requiresAuth: true, adminOnly: true },
-  },
-
-  { path: "/", redirect: { name: "menu" } },
-];
-
 const router = createRouter({
   history: createWebHistory(),
-  routes,
+  routes: [
+    { path: "/", redirect: { name: "menu" } },
+
+   
+    { path: "/login", name: "login", component: () => import("@/components/auth/LoginPage.vue") },
+
+    
+    { path: "/menu", name: "menu", component: () => import("@/components/menu/MenuPage.vue") },
+    { path: "/my-orders", name: "my-orders", component: () => import("@/components/orders/MyOrdersPage.vue"), meta: { requiresAuth: true } },
+
+    
+    { path: "/orders", name: "orders", component: () => import("@/components/orders/OrdersPage.vue"), meta: { requiresAdmin: true } },
+    { path: "/categories", name: "categories", component: () => import("@/components/categories/CategoriesPage.vue"), meta: { requiresAdmin: true } },
+    { path: "/customers", name: "customers", component: () => import("@/components/customers/CustomersPage.vue"), meta: { requiresAdmin: true } },
+    { path: "/order-items", name: "order-items", component: () => import("@/components/order-items/OrderItemsPage.vue"), meta: { requiresAdmin: true } },
+
+   
+    { path: "/:pathMatch(.*)*", redirect: { name: "menu" } },
+  ],
 });
 
-router.beforeEach(async (to) => {
+
+router.beforeEach(async (to, from, next) => {
   const store = useUserStore();
-
-  if (!store.ready) {
-    try { await store.restore(); } catch {}
-  }
-
-  if (to.meta?.public) {
-    if (store.isAuthed) {
-      const next = (to.query?.next && String(to.query.next)) || "/menu";
-      return next;
-    }
-    return true;
-  }
+  if (!store.ready) { await store.restore(); }
 
   if (to.meta?.requiresAuth && !store.isAuthed) {
-    return { name: "login", query: { next: to.fullPath || "/menu" } };
+    return next({ name: "login", query: { next: to.fullPath } });
   }
-
-  if (to.meta?.adminOnly && !store.isAdmin) {
-    return { name: "menu" };
+  if (to.meta?.requiresAdmin && !store.isAdmin) {
+    return next({ name: "menu" });
   }
-
-  return true;
+  return next();
 });
 
 export default router;

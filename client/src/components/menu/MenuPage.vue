@@ -2,7 +2,7 @@
   <div v-if="ready" class="container my-4">
     <h1 class="mb-3">Позиции меню</h1>
 
-    <!-- Пользовательский режим -->
+   
     <div v-if="!canAdmin" class="alert alert-light border d-flex flex-wrap gap-3 align-items-center mb-3">
       <strong>Режим добавления:</strong>
       <div class="form-check form-check-inline">
@@ -216,9 +216,13 @@ import "@/styles/admin.css";
 import axios from "axios";
 
 axios.defaults.withCredentials = true;
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
+
+axios.defaults.withCredentials = true;
 async function ensureCsrf(){ try{ await axios.get("/api/csrf/"); }catch{} }
 
-/* UI */
+
 const ready = ref(false);
 const canAdmin = ref(false);
 const addMode  = ref("one");
@@ -226,7 +230,7 @@ const flash    = ref("");
 const currentOrderId = ref(null);
 const newOrderNext   = ref(false);
 
-/* Данные */
+
 const categories = ref([]);
 const menu = ref([]);
 const loading = ref(false);
@@ -246,7 +250,7 @@ const editForm = ref({
   id:null, title:"", group_id:null, price:0, pictureUrl:null, file:null, preview:null, delete_picture:false
 });
 
-/* helpers */
+
 function money(v){ return Number(v||0).toFixed(2); }
 function categoryName(id){
   const c = categories.value.find(c=>String(c.id)===String(id));
@@ -271,11 +275,11 @@ const stats = computed(()=>{
   return { total, avg: total ? arr.reduce((a,b)=>a+b,0)/total : 0, max: arr.length ? Math.max(...arr) : 0, min: arr.length ? Math.min(...arr) : 0 };
 });
 
-/* API */
+
 async function detectAdmin(){
   try{
     const { data } = await axios.get("/api/auth/me/");
-    // поддерживаем оба формата: {authenticated, user:{...}} и плоский
+    
     const u = data?.user || data || {};
     canAdmin.value = !!(u.is_staff || u.is_superuser);
   }catch{
@@ -324,7 +328,7 @@ async function onCreate(){
   try{
     await ensureCsrf();
     const fd = new FormData();
-    // отправляем поля в ДВУХ вариантах, чтобы покрыть разные сериализаторы
+   
     fd.append("title", createForm.value.title);
     fd.append("name",  createForm.value.title);
     if(Number.isFinite(Number(createForm.value.group_id))){
@@ -414,7 +418,7 @@ async function onDelete(id){
   menu.value = menu.value.filter(x=>x.id!==id);
 }
 
-/* Пользователь: корзина */
+
 async function addToCart(menuId){
   if (adding.value[menuId]) return;
   adding.value[menuId] = true;
@@ -444,7 +448,7 @@ async function addToCart(menuId){
   }
 }
 
-/* Инициализация */
+
 onMounted(async ()=>{
   await detectAdmin();
   await Promise.allSettled([ loadCategories(), loadMenu() ]);

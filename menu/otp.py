@@ -20,12 +20,7 @@ class OTPSerializer(serializers.Serializer):
     key = serializers.CharField(min_length=6, max_length=6)
 
 class TwoFactorViewSet(GenericViewSet):
-    """
-    /api/2fa/otp-secret/  -> выдать/создать секрет и otpauth://
-    /api/2fa/otp-login/   -> проверить код, выставить флаг в кэше
-    /api/2fa/otp-status/  -> проверить флаг
-    /api/2fa/otp-logout/  -> сбросить флаг
-    """
+
     permission_classes = [IsAuthenticated]
 
     @action(detail=False, methods=["GET"], url_path="otp-secret")

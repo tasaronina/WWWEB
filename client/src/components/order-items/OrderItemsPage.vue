@@ -4,13 +4,17 @@ import { ref, onMounted, computed } from "vue"
 import { downloadExport, ensureCsrf } from "@/api"
 import "@/styles/admin.css"
 
+axios.defaults.withCredentials = true;
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
+
 axios.defaults.withCredentials = true
 
 const canAdmin = ref(false)
 async function detectAdmin(){
   try{
     const { data } = await axios.get("/api/auth/me/")
-    // поддерживаем оба формата: плоский и user-вложенный
+
     const u = data?.user || data || {}
     canAdmin.value = !!(u.is_superuser || u.is_staff)
   }catch{
@@ -100,7 +104,7 @@ async function onSave(it){
 function buildExportParams(){ return {} }
 async function onExport(type){
   if(!canAdmin.value) return
-  // ожидаем /api/order-items/export/?type=excel|word
+  
   await downloadExport("order-items", buildExportParams(), type, "order_items")
 }
 
@@ -136,7 +140,7 @@ function resetFilters(){ filters.value = { id:"", order:"", menuText:"", qty:"" 
       </div>
     </div>
 
-    <!-- создание (только админ) -->
+   
     <div class="row g-2 align-items-end mb-3" v-if="canAdmin">
       <div class="col-md-4">
         <label class="form-label">Заказ</label>
@@ -163,7 +167,7 @@ function resetFilters(){ filters.value = { id:"", order:"", menuText:"", qty:"" 
       </div>
     </div>
 
-    <!-- фильтры -->
+    
     <div class="card mb-3">
       <div class="card-body">
         <div class="row g-2 align-items-center">

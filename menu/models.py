@@ -1,5 +1,5 @@
 from django.db import models
-from django.conf import settings  # использовать актуальную модель пользователя
+from django.conf import settings  
 
 
 class Category(models.Model):
@@ -55,7 +55,7 @@ class Customer(models.Model):
 
 class Order(models.Model):
     STATUS_CHOICES = [
-        ("DRAFT", "Черновик"),      # корзина/незавершённый заказ
+        ("DRAFT", "Черновик"),    
         ("NEW", "Новый"),
         ("IN_PROGRESS", "В работе"),
         ("DONE", "Готов"),
@@ -68,7 +68,7 @@ class Order(models.Model):
         verbose_name="Клиент",
         related_name="orders",
         null=True,
-        blank=True,                 # ← можно создать заказ без выбранного клиента
+        blank=True,               
     )
     created_at = models.DateTimeField("Создан", auto_now_add=True)
     status = models.CharField("Статус", choices=STATUS_CHOICES, default="DRAFT", max_length=20)
@@ -99,7 +99,7 @@ class OrderItem(models.Model):
         on_delete=models.PROTECT,
         verbose_name="Позиция меню",
         related_name="order_items",
-        null=True,                  # оставляем как было у тебя, чтобы не ломать миграции
+        null=True,                 
         blank=True,
     )
     qty = models.PositiveIntegerField("Количество", default=1)
@@ -128,7 +128,7 @@ class Profile(models.Model):
     )
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=ROLE_USER)
 
-    # Секрет для TOTP (2FA)
+ 
     opt_key = models.CharField("OTP-секрет", max_length=64, blank=True, null=True)
 
     class Meta:

@@ -1,3 +1,5 @@
+
+
 <template>
   <div class="container my-4">
     <h1 class="mb-3">Категории</h1>
@@ -84,6 +86,10 @@ import {ref, computed, onMounted} from "vue"
 import axios from "axios"
 import "bootstrap/dist/js/bootstrap.bundle.min.js"
 import "@/styles/admin.css"
+
+axios.defaults.withCredentials = true;
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
 
 axios.defaults.withCredentials = true
 

@@ -1,4 +1,4 @@
-# Экспорт заказов. Только для админов. Исправлено под поля qty и menu.price.
+
 
 from datetime import datetime
 from decimal import Decimal
@@ -54,7 +54,7 @@ def _customer_name(order):
 
 
 def _unit_price(item):
-    # для твоей модели OrderItem: qty + menu.price
+    
     m = getattr(item, "menu", None)
     if m and hasattr(m, "price") and m.price is not None:
         return Decimal(m.price)
@@ -129,7 +129,7 @@ class OrdersExportView(APIView):
 
     def get_queryset(self, request):
         qs = Order.objects.select_related("customer", "user").prefetch_related("items__menu").order_by("-id")
-        # Допфильтры для админского экспорта
+       
         p = request.query_params
         status = p.get("status")
         search = p.get("search")

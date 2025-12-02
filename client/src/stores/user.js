@@ -1,56 +1,51 @@
+
 import { defineStore } from "pinia";
-import api, { ensureCsrf } from "@/api";
+import axios from "axios";
+import router from "@/router";
+
+axios.defaults.withCredentials = true;
+
+async function ensureCsrf() {
+  try { await axios.get("/api/csrf/"); } catch {  }
+}
 
 export const useUserStore = defineStore("user", {
   state: () => ({
-    // базовое состояние
-    ready: false,          // для совместимости с твоим App.vue
-    initialized: false,    // внутренний флаг
-    authenticated: false,
+    ready: false,
     user: null,
-    otp_ttl: 0,
   }),
   getters: {
-    isAuthed(state) {
-      return !!state.authenticated;
-    },
-    isAdmin(state) {
-      return !!state.user?.is_staff || !!state.user?.is_superuser;
-    },
-    username(state) {
-      return state.user?.username || state.user?.email || "";
-    },
+    isAuthed: (s) => !!s.user,
+    username: (s) => s.user?.username || "",
+    isAdmin:  (s) => !!(s.user?.is_staff || s.user?.is_superuser),
   },
   actions: {
-    async fetchMe() {
-      const { data } = await api.get("/api/auth/me/");
-      this.authenticated = !!data?.authenticated;
-      this.user = data?.user || null;
-      this.otp_ttl = Number(data?.otp_ttl || 0);
-      this.initialized = true;
-      this.ready = true;    // совместимость с твоим кодом
-      return data;
-    },
-
-    // алиас для твоего App.vue
     async restore() {
-      return await this.fetchMe();
+      await this.refresh();
+      this.ready = true;
     },
-
+    async refresh() {
+      try {
+        const { data } = await axios.get("/api/auth/me/");
+        this.user = data?.is_authenticated ? data : null;
+      } catch {
+        this.user = null;
+      }
+      return this.user;
+    },
     async login(username, password) {
       await ensureCsrf();
-      await api.post("/api/auth/login/", { username, password });
-      return await this.fetchMe(); // здесь authenticated уже true
+      const { data } = await axios.post("/api/auth/login/", { username, password });
+      const ok = !!(data && (data.ok === true || data.success === true));
+      if (!ok) throw new Error("bad_credentials");
+      await this.refresh();
+      return true;
     },
-
     async logout() {
-      await ensureCsrf();
-      await api.post("/api/auth/logout/");
-      this.authenticated = false;
+      try { await axios.post("/api/auth/logout/"); } catch { /* ignore */ }
       this.user = null;
-      this.otp_ttl = 0;
-      this.ready = true;
-      this.initialized = true;
+      
+      await router.replace({ name: "login" });
     },
   },
 });

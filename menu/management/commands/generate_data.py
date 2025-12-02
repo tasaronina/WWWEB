@@ -12,7 +12,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         fake = Faker(["ru_RU"])
 
-        # --- Категории ---
+       
         categories = list(Category.objects.all())
         for _ in range(5):
             category = Category.objects.create(
@@ -20,7 +20,7 @@ class Command(BaseCommand):
             )
             categories.append(category)
 
-        # --- Пункты меню ---
+        
         menus = list(Menu.objects.all())
         for _ in range(50):
             menu_item = Menu.objects.create(
@@ -29,7 +29,7 @@ class Command(BaseCommand):
             )
             menus.append(menu_item)
 
-        # --- Клиенты ---
+      
         customers = list(Customer.objects.all())
         for _ in range(200):
             customer = Customer.objects.create(
@@ -38,11 +38,11 @@ class Command(BaseCommand):
             )
             customers.append(customer)
 
-        # --- Заказы (основная таблица) ---
+        
         orders_created = 0
         for _ in range(1000):
             if not customers:
-                # На всякий случай, чтобы не упасть
+                
                 customer = Customer.objects.create(
                     name=fake.name(),
                     phone=fake.phone_number(),

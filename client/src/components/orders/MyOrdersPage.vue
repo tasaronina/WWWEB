@@ -2,16 +2,20 @@
 import { ref, reactive, onMounted } from "vue";
 import api, { ensureCsrf } from "@/api";
 
+axios.defaults.withCredentials = true;
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
+
 const orders = ref([]);
-const itemsByOrder = ref({}); // { orderId: [items] }
+const itemsByOrder = ref({}); 
 const loading = ref(false);
 
-// состояние модалки редактирования
+
 const editOpen = ref(false);
 const editing = reactive({
   id: null,
   status: "NEW",
-  rows: [], // [{id, name, price, qty}]
+  rows: [], 
 });
 const saving = ref(false);
 const errorMsg = ref("");
@@ -70,10 +74,10 @@ async function saveEdit(){
   try{
     await ensureCsrf();
 
-    // 1) статус заказа
+    
     await api.patch(`/api/orders/${editing.id}/`, { status: editing.status });
 
-    // 2) количества/удаления
+    
     const original = itemsByOrder.value[editing.id] || [];
     const byId = Object.fromEntries(original.map(r => [r.id, r]));
 
@@ -102,7 +106,7 @@ async function deleteOrder(orderId){
   await loadOrdersAndItems();
 }
 
-// ← ключевая правка: авто-загрузка при заходе на страницу
+
 onMounted(loadOrdersAndItems);
 </script>
 
@@ -160,7 +164,7 @@ onMounted(loadOrdersAndItems);
       </div>
     </div>
 
-    <!-- Модалка редактирования заказа -->
+    
     <div class="modal fade show" tabindex="-1" style="display:block" v-if="editOpen" @click.self="editOpen=false">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">

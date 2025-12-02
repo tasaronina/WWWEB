@@ -2,7 +2,7 @@
   <div class="modal fade" tabindex="-1" ref="modalEl">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
-        <!-- novalidate: отключаем нативную блокировку сабмита, валидируем сами -->
+        
         <form @submit.prevent="submit" novalidate>
           <div class="modal-header">
             <h5 class="modal-title">Двойная авторизация</h5>
@@ -12,7 +12,7 @@
           <div class="modal-body">
             <p class="text-muted mb-3">Введите 6-значный код из приложения.</p>
 
-            <!-- Подсказка для первичной привязки -->
+           
             <div v-if="secretInfo" class="alert alert-info py-2">
               <div class="small">
                 Секрет для привязки: <code>{{ secretInfo.secret }}</code>
@@ -76,7 +76,7 @@ const code = ref("");
 const loading = ref(false);
 const error = ref("");
 const ttlLeft = ref(0);
-const secretInfo = ref(null); // {secret, otpauth_url}
+const secretInfo = ref(null); 
 
 let timer = null;
 
@@ -105,7 +105,7 @@ function show() {
   loading.value = false;
   ttlLeft.value = 0;
   secretInfo.value = null;
-  preloadSecretIfNeeded(); // получим секрет только если НЕ подтверждено
+  preloadSecretIfNeeded();
   modal?.show();
 }
 
@@ -115,18 +115,18 @@ async function preloadSecretIfNeeded() {
     const confirmed = !!st?.data?.confirmed;
     const ttl = Number(st?.data?.ttl_seconds || 0);
     ttlLeft.value = Math.max(0, ttl);
-    // секрет показываем ТОЛЬКО если ещё не подтверждено
+    
     if (!confirmed) {
       const { data } = await api.get("/api/2fa/otp-secret/");
       if (data?.secret) secretInfo.value = data;
     }
   } catch {
-    /* игнорируем */
+    
   }
 }
 
 async function submit() {
-  if (code.value.length !== 6) return; // простая защита
+  if (code.value.length !== 6) return; 
   error.value = "";
   loading.value = true;
   try {

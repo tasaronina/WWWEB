@@ -4,7 +4,7 @@
 
     <div v-if="error" class="alert alert-danger mb-3">Ошибка: {{ error }}</div>
 
-    <!-- Панель: создать заказ + статистика -->
+
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
       <button class="btn btn-primary" @click="openCreateModal">Создать заказ</button>
 
@@ -279,11 +279,15 @@ import { ref, computed, onMounted } from "vue"
 import "bootstrap/dist/js/bootstrap.bundle.min.js"
 import "@/styles/admin.css"
 
+axios.defaults.withCredentials = true;
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
+
 axios.defaults.withCredentials = true
 
 const STATUSES = ["NEW", "IN_PROGRESS", "DONE", "CANCELLED"]
 
-// ---------- state ----------
+
 const loading = ref(false)
 const saving  = ref(false)
 const error   = ref("")
@@ -295,13 +299,13 @@ const menu = ref([])
 const filters = ref({ id:"", customer:"", status:"" })
 const stats = ref({ total: 0, avgId: "—", maxId: "—", minId: "—" })
 
-// create modal state
+
 const createModalRef = ref(null)
 let createModal
 const createDraft = ref({ customer_id: "", status: "NEW", items: [] })
 const createAdd = ref({ query: "", qty: 1 })
 
-// edit modal state
+
 const editModalRef = ref(null)
 let editModal
 const edit = ref({
@@ -310,7 +314,7 @@ const edit = ref({
   add: { query: "", qty: 1 },
 })
 
-// ---------- utils ----------
+
 function formatMoney(v){
   const n = Number(v || 0)
   return n.toFixed(2)
@@ -343,7 +347,7 @@ function menuPriceById(id){
   return Number(m?.price ?? 0)
 }
 
-// ---------- id extraction & normalizers ----------
+
 function extractId(val){
   if (val == null) return null
   if (typeof val === "number") return Number.isFinite(val) ? val : null
@@ -351,7 +355,7 @@ function extractId(val){
     if ("id" in val) return extractId(val.id)
     return null
   }
-  // string: "2015" или "/api/orders/2015/"
+ 
   const m = String(val).match(/\d+/)
   return m ? Number(m[0]) : null
 }
@@ -367,7 +371,7 @@ function toItemShape(x){
   }
 }
 
-// ---------- fetchers ----------
+
 async function fetchOrders(){
   const { data } = await axios.get("/api/orders/")
   orders.value = (data || []).map(o => ({
@@ -405,9 +409,7 @@ async function fetchMenu(){
   }))
 }
 
-/**
- * ВСЕГДА фильтруем по orderId на фронте и приводим поля к единому виду.
- */
+
 async function fetchOrderItems(orderId){
   try{
     const { data } = await axios.get(`/api/order-items/`, { params: { order_id: orderId } })
@@ -417,7 +419,7 @@ async function fetchOrderItems(orderId){
   }
 }
 
-// ---------- filters ----------
+
 const filteredOrders = computed(()=>{
   const id = filters.value.id.trim()
   const cust = filters.value.customer.trim().toLowerCase()
@@ -432,7 +434,7 @@ const filteredOrders = computed(()=>{
 })
 function resetFilters(){ filters.value = { id:"", customer:"", status:"" } }
 
-// ---------- create modal logic ----------
+
 function openCreateModal(){
   createDraft.value = { customer_id: "", status: "NEW", items: [] }
   createAdd.value = { query: "", qty: 1 }
@@ -479,7 +481,7 @@ async function saveCreateDraft(){
   }
 }
 
-// ---------- edit modal logic ----------
+
 function openEditModal(order){
   edit.value.order = { id: extractId(order.id), status: order.status }
   edit.value.items = []
@@ -535,14 +537,14 @@ async function saveEditOrder(){
   }
 }
 
-// ---------- delete order ----------
+
 async function removeOrder(o){
   if(!confirm(`Удалить заказ #${o.id}?`)) return
   await axios.delete(`/api/orders/${o.id}/`)
   await fetchOrders()
 }
 
-// ---------- mount ----------
+
 onMounted(async ()=>{
   loading.value = true; error.value=""
   try{

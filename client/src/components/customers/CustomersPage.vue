@@ -120,6 +120,10 @@ import axios from "axios"
 import "bootstrap/dist/js/bootstrap.bundle.min.js"
 import "@/styles/admin.css"
 
+axios.defaults.withCredentials = true;
+axios.defaults.xsrfCookieName = "csrftoken";
+axios.defaults.xsrfHeaderName = "X-CSRFToken";
+
 axios.defaults.withCredentials = true
 
 const customers = ref([])
@@ -164,7 +168,7 @@ async function load(){
     customers.value = data.map(x=>({
       id:x.id, name:x.name||x.title||"",
       photoUrl: x.photo || x.image || x.picture || null
-    })).sort((a,b)=>a.id-b.id) // по ID ↑
+    })).sort((a,b)=>a.id-b.id) 
   } finally { loading.value = false }
 }
 
@@ -185,7 +189,7 @@ async function createCustomer(){
       id:data.id, name:data.name||createForm.value.name,
       photoUrl: data.photo || data.image || data.picture || null
     })
-    customers.value.sort((a,b)=>a.id-b.id) // новый — внизу
+    customers.value.sort((a,b)=>a.id-b.id) 
     createForm.value = { name:"", file:null }
   } finally { creating.value = false }
 }

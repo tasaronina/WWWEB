@@ -1,14 +1,14 @@
 <template>
   <div>
-    <!-- шапка скрыта на /login -->
+    
     <header v-if="route.path !== '/login'" class="border-bottom bg-white">
       <div class="container d-flex align-items-center justify-content-between py-2">
-        <!-- Бренд -->
+        
         <RouterLink :to="{name:'menu'}" class="text-decoration-none fw-semibold text-dark">
           Кофейня
         </RouterLink>
 
-        <!-- Навигация -->
+       
         <nav class="d-flex align-items-center gap-3">
           <RouterLink
             :to="{name:'menu'}"
@@ -18,7 +18,7 @@
             Меню
           </RouterLink>
 
-          <!-- пользователь -->
+         
           <RouterLink
             v-if="store.isAuthed && !isAdmin"
             :to="{name:'my-orders'}"

@@ -2,7 +2,7 @@ from django.core.cache import cache
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 
 
-# ----------------- helpers -----------------
+
 def _otp_key(user_id: int) -> str:
     return f"otp_good:{user_id}"
 
@@ -10,18 +10,11 @@ def _is_admin(user) -> bool:
     return bool(user and (user.is_staff or user.is_superuser))
 
 def _is_owner(obj, user) -> bool:
-    """
-    Универсальная проверка владельца:
-    • obj.user
-    • obj.owner
-    • obj.created_by
-    • obj.customer.user  (частый случай для заказов)
-    • obj.profile.user   (на всякий)
-    """
+    
     if not (user and user.is_authenticated):
         return False
 
-    # прямые поля
+    
     for attr in ("user", "owner", "created_by"):
         if hasattr(obj, attr):
             try:
@@ -29,7 +22,7 @@ def _is_owner(obj, user) -> bool:
             except Exception:
                 pass
 
-    # вложенные: customer.user / profile.user
+    
     for parent in ("customer", "profile"):
         if hasattr(obj, parent):
             parent_obj = getattr(obj, parent)
@@ -42,9 +35,9 @@ def _is_owner(obj, user) -> bool:
     return False
 
 
-# ----------------- permissions -----------------
+
 class IsAdminOrReadOnly(BasePermission):
-    """Чтение — всем, запись — только админу/суперпользователю."""
+   
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
             return True
@@ -52,7 +45,7 @@ class IsAdminOrReadOnly(BasePermission):
 
 
 class WriteRequiresOTP(BasePermission):
-    """Любая небезопасная операция разрешена только после успешного OTP."""
+   
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
             return True
@@ -63,10 +56,7 @@ class WriteRequiresOTP(BasePermission):
 
 
 class AllowUserWriteOrAdminWithOTP(BasePermission):
-    """
-    Обычный аутентифицированный пользователь может писать сразу.
-    Админ/суперпользователь — только после OTP.
-    """
+    
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
             return True
@@ -79,11 +69,7 @@ class AllowUserWriteOrAdminWithOTP(BasePermission):
 
 
 class IsOwnerOrAdmin(BasePermission):
-    """
-    Чтение — всем. Запись — только владельцу объекта или админу.
-    (OTP здесь не требуется — используйте вместе с WriteRequiresOTP,
-     если нужно дополнительно требовать 2FA.)
-    """
+    
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
             return True
@@ -96,7 +82,7 @@ class IsOwnerOrAdmin(BasePermission):
         return _is_admin(u) or _is_owner(obj, u)
 
 
-# ----------------- aliases for backward-compat -----------------
+
 DoubleAuthRequired = WriteRequiresOTP
 OTPRequired = WriteRequiresOTP
 AdminWriteNeedsOTP = WriteRequiresOTP

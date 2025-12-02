@@ -1,4 +1,4 @@
-# menu/views.py
+
 from django.contrib.auth import authenticate, login, logout
 from django.db.models import F, Sum, Avg, Max, Min, Count, ExpressionWrapper, DecimalField
 from django.shortcuts import get_object_or_404
@@ -26,7 +26,7 @@ from django.views.generic import TemplateView
 
 class ShowMenuView(TemplateView):
     template_name = "menu/show_menu.html"
-# ---------------- CSRF & AUTH ----------------
+
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
@@ -64,11 +64,6 @@ def me_view(request):
         "is_superuser": u.is_superuser,
     })
 
-# ---------------- Permissions ----------------
-# (IsAdminOrReadOnly и DoubleAuthRequired берутся из permissions.py)
-
-# ---------------- Catalog ----------------
-
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all().order_by("id")
     serializer_class = CategorySerializer
@@ -90,7 +85,7 @@ class MenuViewSet(viewsets.ModelViewSet):
             "min": float(data["min"] or 0),
         })
 
-# ---------------- Orders & Items ----------------
+
 
 def _with_total_queryset(base_qs):
     money = ExpressionWrapper(
@@ -163,7 +158,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         order = None
         if order_id and not new_order:
             order = get_object_or_404(Order, pk=order_id)
-            # пользователь не может добавлять в чужой заказ
+           
             u = request.user
             if not (u.is_staff or u.is_superuser) and order.user_id != u.id:
                 raise PermissionDenied("Нельзя добавлять позиции в чужой заказ")
