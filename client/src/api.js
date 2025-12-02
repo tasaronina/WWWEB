@@ -1,44 +1,43 @@
-
 import axios from "axios";
 
-export const api = axios.create({
-  baseURL: "",              
+const api = axios.create({
+  baseURL: "",
   withCredentials: true,
+  xsrfCookieName: "csrftoken",
+  xsrfHeaderName: "X-CSRFToken",
 });
-
-
-api.defaults.xsrfCookieName = "csrftoken";
-api.defaults.xsrfHeaderName = "X-CSRFToken";
-
 
 function getCookie(name) {
   const m = document.cookie.match(new RegExp("(^|;)\\s*" + name + "\\s*=\\s*([^;]+)"));
   return m ? decodeURIComponent(m.pop()) : "";
 }
+
 function withCsrf(headers = {}) {
   const token = getCookie("csrftoken");
   return { ...headers, "X-CSRFToken": token };
 }
 
+api.interceptors.request.use((config) => {
+  const m = (config.method || "").toUpperCase();
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(m)) {
+    config.headers = withCsrf(config.headers || {});
+  }
+  return config;
+});
 
 export async function ensureCsrf() {
   try { await api.get("/api/csrf/"); } catch {}
 }
 
-
 export async function login(username, password) {
   await ensureCsrf();
-  const { data } = await api.post(
-    "/api/auth/login/",
-    { username, password },
-    { headers: withCsrf() }
-  );
-  return data; 
+  const { data } = await api.post("/api/auth/login/", { username, password });
+  return data;
 }
 
 export async function logout() {
   await ensureCsrf();
-  const { data } = await api.post("/api/auth/logout/", {}, { headers: withCsrf() });
+  const { data } = await api.post("/api/auth/logout/", {});
   return data;
 }
 
@@ -47,26 +46,27 @@ export async function me() {
   return data;
 }
 
-
 export async function otpStatus() {
   const { data } = await api.get("/api/2fa/otp-status/");
   return data;
 }
+
 export async function otpSecret() {
   const { data } = await api.get("/api/2fa/otp-secret/");
   return data;
 }
+
 export async function otpLogin(code) {
   await ensureCsrf();
-  const { data } = await api.post("/api/2fa/otp-login/", { key: String(code || "").trim() }, { headers: withCsrf() });
-  return data;
-}
-export async function otpReset() {
-  await ensureCsrf();
-  const { data } = await api.post("/api/2fa/otp-reset/", {}, { headers: withCsrf() });
+  const { data } = await api.post("/api/2fa/otp-login/", { key: String(code || "").trim() });
   return data;
 }
 
+export async function otpReset() {
+  await ensureCsrf();
+  const { data } = await api.post("/api/2fa/otp-reset/", {});
+  return data;
+}
 
 export async function downloadExport(resource, params, type, filenameNoExt) {
   const usp = new URLSearchParams({ ...(params || {}), type: type || "excel" });
@@ -79,3 +79,6 @@ export async function downloadExport(resource, params, type, filenameNoExt) {
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
+export { api };
+export default api;
