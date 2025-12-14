@@ -1,459 +1,254 @@
 <template>
-  <div v-if="ready" class="container my-4">
-    <h1 class="mb-3">Позиции меню</h1>
+  <v-container class="py-6" v-if="ready">
+    <div class="text-h5 mb-4">Позиции меню</div>
 
-   
-    <div v-if="!canAdmin" class="alert alert-light border d-flex flex-wrap gap-3 align-items-center mb-3">
-      <strong>Режим добавления:</strong>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="radio" id="mode-one" value="one" v-model="addMode">
-        <label class="form-check-label" for="mode-one">В один заказ</label>
-      </div>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="radio" id="mode-sep" value="sep" v-model="addMode">
-        <label class="form-check-label" for="mode-sep">Раздельно (каждая позиция — отдельный заказ)</label>
-      </div>
+    <v-alert v-if="!canAdmin" variant="outlined" class="mb-4 d-flex align-center ga-4 flex-wrap">
+      <div class="font-weight-medium">Режим добавления:</div>
+      <v-radio-group v-model="addMode" inline hide-details>
+        <v-radio label="В один заказ" value="one" />
+        <v-radio label="Раздельно (каждая позиция — отдельный заказ)" value="sep" />
+      </v-radio-group>
+      <template v-if="addMode==='one'">
+        <div class="ms-auto d-flex align-center ga-3">
+          <span class="text-medium-emphasis">Текущий заказ: <strong>{{ currentOrderId ? ('#'+currentOrderId) : '— (создастся при добавлении)' }}</strong></span>
+          <v-btn size="small" variant="outlined" @click="startNewOrder">Начать новый</v-btn>
+        </div>
+      </template>
+      <span class="text-medium-emphasis" v-if="flash">{{ flash }}</span>
+    </v-alert>
 
-      <div v-if="addMode==='one'" class="ms-auto d-flex align-items-center gap-2">
-        <span class="small text-muted">
-          Текущий заказ:
-          <strong>{{ currentOrderId ? ('#'+currentOrderId) : '— (создастся при добавлении)' }}</strong>
-        </span>
-        <button class="btn btn-sm btn-outline-secondary" @click="startNewOrder">Начать новый</button>
-      </div>
+    <v-card v-if="canAdmin" class="mb-4">
+      <v-card-text>
+        <div class="text-subtitle-1 mb-3">Добавить позицию</div>
+        <v-form @submit.prevent="onCreate">
+          <v-row class="align-end">
+            <v-col cols="12" md="4"><v-text-field v-model="createForm.title" label="Название" /></v-col>
+            <v-col cols="12" md="3">
+              <v-select v-model="createForm.group_id" :items="categories" item-title="title" item-value="id" label="Категория" clearable />
+            </v-col>
+            <v-col cols="12" md="2"><v-text-field v-model.number="createForm.price" type="number" label="Цена" /></v-col>
+            <v-col cols="12" md="3"><v-file-input v-model="createFile" label="Фото" accept="image/*" /></v-col>
+          </v-row>
+          <v-btn color="primary" class="mt-2" :loading="creating" type="submit">Добавить</v-btn>
+        </v-form>
+      </v-card-text>
+    </v-card>
 
-      <span class="text-muted small" v-if="flash">{{ flash }}</span>
-    </div>
-
-    <!-- Админ: форма добавления -->
-    <div class="card mb-3" v-if="canAdmin">
-      <div class="card-body">
-        <h5 class="card-title mb-3">Добавить позицию</h5>
-        <form @submit.prevent="onCreate">
-          <div class="row g-3 align-items-end">
-            <div class="col-md-4">
-              <label class="form-label">Название</label>
-              <input v-model="createForm.title" class="form-control" required />
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Категория</label>
-              <select v-model="createForm.group_id" class="form-select">
-                <option :value="null">— не выбрано —</option>
-                <option v-for="c in categories" :key="c.id" :value="c.id">
-                  {{ c.title || c.name }}
-                </option>
-              </select>
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Цена</label>
-              <input v-model.number="createForm.price" type="number" min="0" step="0.01" class="form-control" />
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Фото</label>
-              <input type="file" class="form-control" accept="image/*" @change="onPickCreate" />
-            </div>
-          </div>
-          <div class="mt-3">
-            <button class="btn btn-primary" :disabled="creating">Добавить</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Статистика -->
-    <div class="alert alert-light border d-flex flex-wrap gap-4 mb-3">
+    <v-alert variant="outlined" class="mb-3 d-flex flex-wrap ga-6">
       <div>Всего позиций: <strong>{{ stats.total }}</strong></div>
       <div>Средняя цена: <strong>{{ money(stats.avg) }}</strong></div>
       <div>Макс. цена: <strong>{{ money(stats.max) }}</strong></div>
       <div>Мин. цена: <strong>{{ money(stats.min) }}</strong></div>
-    </div>
+    </v-alert>
 
-    <!-- Фильтры -->
-    <div class="card mb-3">
-      <div class="card-body">
-        <div class="row g-2">
-          <div class="col-md-6">
-            <input v-model="filters.search" class="form-control" placeholder="Фильтр по названию" />
+    <v-card class="mb-3">
+      <v-card-text>
+        <v-row>
+          <v-col cols="12" md="6"><v-text-field v-model="filters.search" label="Фильтр по названию" /></v-col>
+          <v-col cols="12" md="6"><v-select v-model="filters.category" :items="categories" item-title="title" item-value="id" label="Категория" clearable /></v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+
+    <v-data-table :headers="headers" :items="filteredMenu" :loading="loading" item-key="id">
+      <template #item.picture="{ item }">
+        <div class="thumb-64"><img v-if="item.pictureUrl" :src="item.pictureUrl" alt="" /><div v-else class="thumb-empty">нет</div></div>
+      </template>
+      <template #item.category="{ item }">{{ categoryName(item.group_id) || '—' }}</template>
+      <template #item.actions="{ item }">
+        <template v-if="!canAdmin">
+          <div class="d-flex align-center ga-2">
+            <v-text-field v-model.number="qty[item.id]" type="number" min="1" density="compact" style="max-width: 100px" @focus="initQty(item.id)" />
+            <v-btn size="small" color="primary" :loading="adding[item.id]===true" @click="addToCart(item.id)">Добавить</v-btn>
           </div>
-          <div class="col-md-6">
-            <select v-model="filters.category" class="form-select">
-              <option value="">Все категории</option>
-              <option v-for="c in categories" :key="c.id" :value="String(c.id)">
-                {{ c.title || c.name }}
-              </option>
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
+        </template>
+        <template v-else>
+          <v-btn size="small" variant="outlined" class="mr-2" @click="startEdit(item)">Редактировать</v-btn>
+          <v-btn size="small" variant="outlined" color="error" @click="onDelete(item.id)">Удалить</v-btn>
+        </template>
+      </template>
+      <template #no-data><div class="py-6 text-medium-emphasis">Ничего не найдено</div></template>
+    </v-data-table>
 
-    <!-- Таблица -->
-    <div class="card">
-      <div class="card-body table-responsive">
-        <table class="table align-middle mb-0">
-          <thead>
-            <tr>
-              <th style="width:80px;">ID</th>
-              <th style="width:100px;">Фото</th>
-              <th>Название</th>
-              <th style="width:200px;">Категория</th>
-              <th style="width:120px;">Цена</th>
-              <th v-if="!canAdmin" style="width:220px;">В корзину</th>
-              <th v-if="canAdmin" style="width:210px;">Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="loading">
-              <td :colspan="6" class="text-center text-muted">Загрузка…</td>
-            </tr>
-
-            <tr v-for="m in filteredMenu" :key="m.id">
-              <td>{{ m.id }}</td>
-              <td>
-                <div class="thumb-64">
-                  <img v-if="m.pictureUrl" :src="m.pictureUrl" alt="">
+    <v-dialog v-model="editOpen" max-width="800" v-if="canAdmin">
+      <v-card>
+        <v-card-title class="text-h6">Редактировать позицию #{{ editForm.id }}</v-card-title>
+        <v-card-text>
+          <v-row>
+            <v-col cols="12" md="6"><v-text-field v-model="editForm.title" label="Название" /></v-col>
+            <v-col cols="12" md="6"><v-select v-model="editForm.group_id" :items="categories" item-title="title" item-value="id" label="Категория" clearable /></v-col>
+            <v-col cols="12" md="4"><v-text-field v-model.number="editForm.price" label="Цена" type="number" /></v-col>
+            <v-col cols="12" md="8">
+              <v-file-input v-model="editFile" label="Фото" accept="image/*" />
+              <div class="d-flex align-center ga-4 mt-2">
+                <div class="thumb-64 border">
+                  <img v-if="editPreview" :src="editPreview" alt="" />
+                  <img v-else-if="editForm.pictureUrl" :src="editForm.pictureUrl" alt="" />
                   <div v-else class="thumb-empty">нет</div>
                 </div>
-              </td>
-              <td class="fw-semibold">{{ m.title }}</td>
-              <td>{{ categoryName(m.group_id) || "—" }}</td>
-              <td>{{ money(m.price) }}</td>
-
-              <!-- Пользователь: добавить в заказ -->
-              <td v-if="!canAdmin">
-                <div class="d-flex gap-2 align-items-center">
-                  <input
-                    type="number" min="1"
-                    class="form-control form-control-sm" style="max-width:90px"
-                    v-model.number="qty[m.id]" @focus="initQty(m.id)"
-                  >
-                  <button class="btn btn-sm btn-primary" :disabled="adding[m.id]===true" @click="addToCart(m.id)">
-                    {{ adding[m.id] ? "Добавляем..." : "Добавить" }}
-                  </button>
-                </div>
-              </td>
-
-              <!-- Админ: CRUD -->
-              <td v-if="canAdmin">
-                <div class="btn-group">
-                  <button class="btn btn-outline-primary btn-sm" @click="startEdit(m)">Редактировать</button>
-                  <button class="btn btn-outline-danger btn-sm" @click="onDelete(m.id)">Удалить</button>
-                </div>
-              </td>
-            </tr>
-
-            <tr v-if="!loading && !filteredMenu.length">
-              <td :colspan="6" class="text-center text-muted">Ничего не найдено</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Модалка редактирования (только админ) -->
-    <div class="modal fade" tabindex="-1" ref="editModalRef" v-if="canAdmin">
-      <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-          <form @submit.prevent="saveEdit">
-            <div class="modal-header">
-              <h5 class="modal-title">Редактировать позицию #{{ editForm.id }}</h5>
-              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-              <div class="row g-3">
-                <div class="col-md-6">
-                  <label class="form-label">Название</label>
-                  <input v-model="editForm.title" class="form-control" required />
-                </div>
-                <div class="col-md-6">
-                  <label class="form-label">Категория</label>
-                  <select v-model="editForm.group_id" class="form-select">
-                    <option :value="null">— не выбрано —</option>
-                    <option v-for="c in categories" :key="c.id" :value="c.id">
-                      {{ c.title || c.name }}
-                    </option>
-                  </select>
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label">Цена</label>
-                  <input v-model.number="editForm.price" type="number" min="0" step="0.01" class="form-control" />
-                </div>
-                <div class="col-md-8">
-                  <label class="form-label">Фото</label>
-                  <input type="file" accept="image/*" class="form-control" @change="onPickEdit" />
-                  <div class="d-flex align-items-center gap-3 mt-2">
-                    <div class="thumb-64 border">
-                      <img v-if="editForm.preview" :src="editForm.preview" alt="">
-                      <img v-else-if="editForm.pictureUrl" :src="editForm.pictureUrl" alt="">
-                      <div v-else class="thumb-empty">нет</div>
-                    </div>
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="delPic" v-model="editForm.delete_picture" />
-                      <label class="form-check-label" for="delPic">Удалить фото</label>
-                    </div>
-                  </div>
-                </div>
+                <v-checkbox v-model="editForm.delete_picture" label="Удалить фото" />
               </div>
-              <div v-if="editError" class="alert alert-danger mt-3">{{ editError }}</div>
-            </div>
-            <div class="modal-footer">
-              <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Закрыть</button>
-              <button class="btn btn-primary" :disabled="saving">Сохранить</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div v-else class="container my-5 text-center text-muted">Загрузка…</div>
+            </v-col>
+          </v-row>
+          <v-alert v-if="editError" type="error" class="mt-2">{{ editError }}</v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="editOpen=false">Закрыть</v-btn>
+          <v-btn color="primary" :loading="saving" @click="saveEdit">Сохранить</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+  </v-container>
+  <v-container v-else class="py-10 text-center text-medium-emphasis">Загрузка…</v-container>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
-import "bootstrap/dist/js/bootstrap.bundle.min.js";
-import "@/styles/admin.css";
-import axios from "axios";
+import { ref, computed, onMounted, watch } from 'vue'
+import axios from 'axios'
 
-axios.defaults.withCredentials = true;
-axios.defaults.xsrfCookieName = "csrftoken";
-axios.defaults.xsrfHeaderName = "X-CSRFToken";
+axios.defaults.withCredentials = true
+axios.defaults.xsrfCookieName = 'csrftoken'
+axios.defaults.xsrfHeaderName = 'X-CSRFToken'
 
-axios.defaults.withCredentials = true;
-async function ensureCsrf(){ try{ await axios.get("/api/csrf/"); }catch{} }
+async function ensureCsrf(){ try{ await axios.get('/api/csrf/') }catch{} }
 
+const headers = [
+  { title:'ID', value:'id', width:80 },
+  { title:'Фото', value:'picture', width:100, sortable:false },
+  { title:'Название', value:'title' },
+  { title:'Категория', value:'category', width:200 },
+  { title:'Цена', value:'price', width:120 },
+  { title:'Действия', value:'actions', width:220, sortable:false },
+]
 
-const ready = ref(false);
-const canAdmin = ref(false);
-const addMode  = ref("one");
-const flash    = ref("");
-const currentOrderId = ref(null);
-const newOrderNext   = ref(false);
+const ready = ref(false)
+const canAdmin = ref(false)
+const addMode  = ref('one')
+const flash    = ref('')
+const currentOrderId = ref(null)
+const newOrderNext   = ref(false)
 
+const categories = ref([])
+const menu = ref([])
+const loading = ref(false)
 
-const categories = ref([]);
-const menu = ref([]);
-const loading = ref(false);
+const filters = ref({ search:'', category:'' })
+const qty = ref({})
+const adding = ref({})
 
-const filters = ref({ search:"", category:"" });
-const qty = ref({});
-const adding = ref({});
+const createForm = ref({ title:'', group_id:null, price:0 })
+const createFile = ref(null)
+const creating = ref(false)
 
-const createForm = ref({ title:"", group_id:null, price:0, file:null });
-const creating = ref(false);
+const editOpen = ref(false)
+const editError = ref('')
+const editForm = ref({ id:null, title:'', group_id:null, price:0, pictureUrl:null, delete_picture:false })
+const editFile = ref(null)
+const editPreview = ref(null)
+watch(editFile,(f)=>{ editPreview.value = f ? URL.createObjectURL(f) : null; if(f) editForm.value.delete_picture=false })
 
-const editModalRef = ref(null);
-let editModal = null;
-const saving = ref(false);
-const editError = ref("");
-const editForm = ref({
-  id:null, title:"", group_id:null, price:0, pictureUrl:null, file:null, preview:null, delete_picture:false
-});
-
-
-function money(v){ return Number(v||0).toFixed(2); }
-function categoryName(id){
-  const c = categories.value.find(c=>String(c.id)===String(id));
-  return c ? (c.title || c.name) : "";
-}
-function initQty(id){ if(!qty.value[id] || qty.value[id] < 1) qty.value[id] = 1; }
-function startNewOrder(){ currentOrderId.value = null; newOrderNext.value = true; flash.value = "Новый заказ: добавьте первую позицию"; setTimeout(()=> flash.value = "", 1500); }
+function money(v){ return Number(v||0).toFixed(2) }
+function categoryName(id){ const c = categories.value.find(c=>String(c.id)===String(id)); return c? (c.title||c.name):'' }
+function initQty(id){ if(!qty.value[id] || qty.value[id] < 1) qty.value[id] = 1 }
+function startNewOrder(){ currentOrderId.value = null; newOrderNext.value = true; flash.value = 'Новый заказ: добавьте первую позицию'; setTimeout(()=> flash.value = '', 1500) }
 
 const filteredMenu = computed(()=>{
-  const q = filters.value.search.trim().toLowerCase();
-  const cat = filters.value.category;
+  const q = filters.value.search.trim().toLowerCase()
+  const cat = String(filters.value.category||'')
   return menu.value.filter(m=>{
-    if(q && !(m.title||"").toLowerCase().includes(q)) return false;
-    if(cat && String(m.group_id)!==cat) return false;
-    return true;
-  });
-});
+    if(q && !(m.title||'').toLowerCase().includes(q)) return false
+    if(cat && String(m.group_id)!==cat) return false
+    return true
+  })
+})
 
 const stats = computed(()=>{
-  const arr = menu.value.map(m=>Number(m.price||0));
-  const total = menu.value.length;
-  return { total, avg: total ? arr.reduce((a,b)=>a+b,0)/total : 0, max: arr.length ? Math.max(...arr) : 0, min: arr.length ? Math.min(...arr) : 0 };
-});
-
+  const arr = menu.value.map(m=>Number(m.price||0))
+  const total = menu.value.length
+  return { total, avg: total ? arr.reduce((a,b)=>a+b,0)/total : 0, max: arr.length ? Math.max(...arr) : 0, min: arr.length ? Math.min(...arr) : 0 }
+})
 
 async function detectAdmin(){
-  try{
-    const { data } = await axios.get("/api/auth/me/");
-    
-    const u = data?.user || data || {};
-    canAdmin.value = !!(u.is_staff || u.is_superuser);
-  }catch{
-    canAdmin.value = false;
-  }
+  try{ const { data } = await axios.get('/api/auth/me/'); const u = data?.user || data || {}; canAdmin.value = !!(u.is_staff || u.is_superuser) }catch{ canAdmin.value = false }
 }
-
 async function loadCategories(){
-  try{
-    const { data } = await axios.get("/api/categories/");
-    const arr = Array.isArray(data) ? data : (data?.results ?? data ?? []);
-    categories.value = arr.map(c => ({
-      id: c.id,
-      title: c.title || c.name || ""
-    }));
-  }catch{
-    categories.value = [];
-  }
+  try{ const { data } = await axios.get('/api/categories/'); const arr = Array.isArray(data) ? data : (data?.results ?? []); categories.value = arr.map(c=>({ id:c.id, title:c.title||c.name||'' })) }catch{ categories.value = [] }
 }
-
 async function loadMenu(){
-  loading.value = true;
+  loading.value = true
   try{
-    const { data } = await axios.get("/api/menu/");
-    const list = Array.isArray(data) ? data : (data?.results ?? data ?? []);
+    const { data } = await axios.get('/api/menu/')
+    const list = Array.isArray(data) ? data : (data?.results ?? data ?? [])
     menu.value = list.map(x=>{
-      const groupId =
-        x.group_id ??
-        (x.group && typeof x.group === "object" ? x.group.id : x.group) ??
-        (x.category && typeof x.category === "object" ? x.category.id : x.category) ??
-        null;
-      return {
-        id: x.id,
-        title: x.title ?? x.name ?? "",
-        group_id: Number(groupId) || null,
-        price: Number(x.price ?? 0),
-        pictureUrl: x.picture || x.image || null
-      };
-    });
-  } finally { loading.value = false; }
+      const groupId = x.group_id ?? (x.group && typeof x.group==='object' ? x.group.id : x.group) ?? (x.category && typeof x.category==='object' ? x.category.id : x.category) ?? null
+      return { id:x.id, title:x.title ?? x.name ?? '', group_id:Number(groupId)||null, price:Number(x.price??0), pictureUrl:x.picture || x.image || null }
+    })
+  } finally { loading.value = false }
 }
 
-function onPickCreate(e){ createForm.value.file = e.target.files?.[0] || null; }
 async function onCreate(){
-  creating.value = true;
+  creating.value = true
   try{
-    await ensureCsrf();
-    const fd = new FormData();
-   
-    fd.append("title", createForm.value.title);
-    fd.append("name",  createForm.value.title);
-    if(Number.isFinite(Number(createForm.value.group_id))){
-      const gid = String(createForm.value.group_id);
-      fd.append("group_id", gid);
-      fd.append("group",    gid);
-      fd.append("category", gid);
-    }
-    fd.append("price", String(Number(createForm.value.price||0)));
-    if(createForm.value.file){
-      fd.append("picture", createForm.value.file);
-      fd.append("image",   createForm.value.file);
-    }
-    const { data } = await axios.post("/api/menu/", fd, { headers:{ "Content-Type":"multipart/form-data" } });
-    menu.value.push({
-      id:data.id,
-      title:data.title ?? data.name ?? createForm.value.title,
-      group_id: data.group_id ?? (data.group?.id) ?? data.category ?? createForm.value.group_id ?? null,
-      price:data.price ?? createForm.value.price,
-      pictureUrl: data.picture || data.image || null
-    });
-    menu.value.sort((a,b)=>a.id-b.id);
-    createForm.value = { title:"", group_id:null, price:0, file:null };
-  } finally { creating.value = false; }
+    await ensureCsrf()
+    const fd = new FormData()
+    fd.append('title', createForm.value.title)
+    fd.append('name',  createForm.value.title)
+    if(Number.isFinite(Number(createForm.value.group_id))){ const gid = String(createForm.value.group_id); fd.append('group_id', gid); fd.append('group', gid); fd.append('category', gid) }
+    fd.append('price', String(Number(createForm.value.price||0)))
+    if(createFile.value){ fd.append('picture', createFile.value); fd.append('image', createFile.value) }
+    const { data } = await axios.post('/api/menu/', fd, { headers:{ 'Content-Type':'multipart/form-data' } })
+    menu.value.push({ id:data.id, title:data.title ?? data.name ?? createForm.value.title, group_id: data.group_id ?? (data.group?.id) ?? data.category ?? createForm.value.group_id ?? null, price:data.price ?? createForm.value.price, pictureUrl: data.picture || data.image || null })
+    menu.value.sort((a,b)=>a.id-b.id)
+    createForm.value = { title:'', group_id:null, price:0 }; createFile.value=null
+  } finally { creating.value = false }
 }
 
-function startEdit(m){
-  if(!editModal && editModalRef.value)
-    editModal = window.bootstrap.Modal.getOrCreateInstance(editModalRef.value, { backdrop:"static", keyboard:false });
-  editError.value = "";
-  editForm.value = {
-    id:m.id, title:m.title, group_id:m.group_id,
-    price:Number(m.price||0), pictureUrl:m.pictureUrl,
-    file:null, preview:null, delete_picture:false
-  };
-  editModal?.show();
-}
-function onPickEdit(e){
-  const f = e.target.files?.[0] || null;
-  editForm.value.file = f;
-  editForm.value.preview = f ? URL.createObjectURL(f) : null;
-  if(f) editForm.value.delete_picture = false;
-}
+function startEdit(m){ editError.value=''; editForm.value = { id:m.id, title:m.title, group_id:m.group_id, price:Number(m.price||0), pictureUrl:m.pictureUrl, delete_picture:false }; editFile.value=null; editOpen.value=true }
 async function saveEdit(){
-  saving.value = true; editError.value = "";
+  saving.value = true; editError.value=''
   try{
-    await ensureCsrf();
-    const fd = new FormData();
-    fd.append("title", editForm.value.title);
-    fd.append("name",  editForm.value.title);
-    if(Number.isFinite(Number(editForm.value.group_id))){
-      const gid = String(editForm.value.group_id);
-      fd.append("group_id", gid);
-      fd.append("group",    gid);
-      fd.append("category", gid);
-    }
-    fd.append("price", String(Number(editForm.value.price || 0)));
-    if(editForm.value.file){
-      fd.append("picture", editForm.value.file);
-      fd.append("image",   editForm.value.file);
-    }
-    if(editForm.value.delete_picture){
-      fd.append("delete_picture","1");
-      fd.append("remove_picture","1");
-    }
-    const { data } = await axios.patch(`/api/menu/${editForm.value.id}/`, fd, { headers:{ "Content-Type":"multipart/form-data" } });
-    const i = menu.value.findIndex(x=>x.id===editForm.value.id);
-    if(i>-1){
-      menu.value[i] = {
-        id:data.id,
-        title:data.title ?? data.name ?? editForm.value.title,
-        group_id: data.group_id ?? (data.group?.id) ?? data.category ?? editForm.value.group_id ?? null,
-        price:data.price ?? editForm.value.price,
-        pictureUrl: data.picture || data.image || (editForm.value.delete_picture ? null : menu.value[i].pictureUrl)
-      };
-      menu.value.sort((a,b)=>a.id-b.id);
-    }
-    editModal?.hide();
-  } catch(e){
-    editError.value = "Не удалось сохранить. Проверьте поля или права.";
-  } finally { saving.value = false; }
+    await ensureCsrf()
+    const fd = new FormData()
+    fd.append('title', editForm.value.title)
+    fd.append('name',  editForm.value.title)
+    if(Number.isFinite(Number(editForm.value.group_id))){ const gid = String(editForm.value.group_id); fd.append('group_id', gid); fd.append('group', gid); fd.append('category', gid) }
+    fd.append('price', String(Number(editForm.value.price||0)))
+    if(editFile.value){ fd.append('picture', editFile.value); fd.append('image', editFile.value) }
+    if(editForm.value.delete_picture){ fd.append('delete_picture','1'); fd.append('remove_picture','1') }
+    const { data } = await axios.patch(`/api/menu/${editForm.value.id}/`, fd, { headers:{ 'Content-Type':'multipart/form-data' } })
+    const i = menu.value.findIndex(x=>x.id===editForm.value.id)
+    if(i>-1){ menu.value[i] = { id:data.id, title:data.title ?? data.name ?? editForm.value.title, group_id: data.group_id ?? (data.group?.id) ?? data.category ?? editForm.value.group_id ?? null, price:data.price ?? editForm.value.price, pictureUrl: data.picture || data.image || (editForm.value.delete_picture ? null : menu.value[i].pictureUrl) } }
+    menu.value.sort((a,b)=>a.id-b.id)
+    editOpen.value=false
+  } catch { editError.value='Не удалось сохранить. Проверьте поля или права.' }
+  finally { saving.value = false }
 }
-async function onDelete(id){
-  if(!confirm("Удалить позицию меню?")) return;
-  await ensureCsrf();
-  await axios.delete(`/api/menu/${id}/`);
-  menu.value = menu.value.filter(x=>x.id!==id);
-}
-
+async function onDelete(id){ if(!confirm('Удалить позицию меню?')) return; await ensureCsrf(); await axios.delete(`/api/menu/${id}/`); menu.value = menu.value.filter(x=>x.id!==id) }
 
 async function addToCart(menuId){
-  if (adding.value[menuId]) return;
-  adding.value[menuId] = true;
+  if (adding.value[menuId]) return
+  adding.value[menuId] = true
   try{
-    initQty(menuId);
-    const count = Math.max(1, Number(qty.value[menuId] || 1));
-    await ensureCsrf();
-    const payload = { menu_id: menuId, qty: count };
-    if (addMode.value === "one") {
-      if (currentOrderId.value) payload.order_id = currentOrderId.value; else payload.new_order = true;
-      if (newOrderNext.value) payload.new_order = true;
+    initQty(menuId)
+    const count = Math.max(1, Number(qty.value[menuId] || 1))
+    await ensureCsrf()
+    const payload = { menu_id: menuId, qty: count }
+    if (addMode.value === 'one'){
+      if (currentOrderId.value) payload.order_id = currentOrderId.value; else payload.new_order = true
+      if (newOrderNext.value) payload.new_order = true
     }
-    if (addMode.value === "sep") payload.new_order = true;
-    const { data } = await axios.post("/api/orders/add-to-cart/", payload);
-    const createdOrderId = data?.order_id || data?.item?.order || data?.item?.order_id || data?.item?.order?.id || null;
-    if (addMode.value === "one") {
-      if (!currentOrderId.value || newOrderNext.value) currentOrderId.value = createdOrderId;
-      newOrderNext.value = false;
-    } else {
-      currentOrderId.value = null;
-    }
-    flash.value = `Добавлено: #${menuId} × ${count}${createdOrderId ? " → заказ #" + createdOrderId : ""}`;
-    qty.value[menuId] = 1;
-    setTimeout(()=>{ flash.value = "" }, 1500);
-  } finally {
-    adding.value[menuId] = false;
-  }
+    if (addMode.value === 'sep') payload.new_order = true
+    const { data } = await axios.post('/api/orders/add-to-cart/', payload)
+    const createdOrderId = data?.order_id || data?.item?.order || data?.item?.order_id || data?.item?.order?.id || null
+    if (addMode.value === 'one'){ if (!currentOrderId.value || newOrderNext.value) currentOrderId.value = createdOrderId; newOrderNext.value = false } else { currentOrderId.value = null }
+    flash.value = `Добавлено: #${menuId} × ${count}${createdOrderId ? ' → заказ #'+createdOrderId : ''}`
+    qty.value[menuId] = 1
+    setTimeout(()=>{ flash.value='' }, 1500)
+  } finally { adding.value[menuId] = false }
 }
 
-
-onMounted(async ()=>{
-  await detectAdmin();
-  await Promise.allSettled([ loadCategories(), loadMenu() ]);
-  ready.value = true;
-});
+onMounted(async()=>{ await detectAdmin(); await Promise.allSettled([loadCategories(), loadMenu()]); ready.value=true })
 </script>
 
 <style scoped>

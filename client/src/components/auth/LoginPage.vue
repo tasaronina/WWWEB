@@ -1,180 +1,140 @@
-
 <template>
-  <div class="container my-5" style="max-width: 820px;">
-    <h1 class="display-5 fw-bold text-center mb-2">Вход</h1>
-    <p class="text-center text-muted mb-4">Введите логин и пароль</p>
-
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
-
-    <div class="card shadow-sm">
-      <div class="card-body p-4">
-        <form @submit.prevent="onSubmit">
-          <div class="row g-3">
-            <div class="col-md-6 offset-md-3">
-              <label class="form-label">Логин</label>
-              <input v-model="form.username" class="form-control" autocomplete="username" />
-            </div>
-            <div class="col-md-6 offset-md-3">
-              <label class="form-label">Пароль</label>
-              <input v-model="form.password" type="password" class="form-control" autocomplete="current-password" />
-            </div>
-            <div class="col-md-6 offset-md-3 d-grid mt-3">
-              <button class="btn btn-primary btn-lg" :disabled="loading">
-                {{ loading ? "Входим..." : "Войти" }}
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
+  <v-container class="py-10" style="max-width: 820px;">
+    <div class="text-center mb-2">
+      <div class="text-h4 font-weight-bold">Вход</div>
+      <div class="text-medium-emphasis">Введите логин и пароль</div>
     </div>
 
-   
-    <div class="modal fade" tabindex="-1" ref="otpModalRef">
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 v-if="otpMode==='verify'" class="modal-title">Подтверждение входа (2FA)</h5>
-            <h5 v-else class="modal-title">Привязка 2FA</h5>
-            <button type="button" class="btn-close" @click="closeOtp"></button>
-          </div>
+    <v-alert v-if="error" type="error" class="mb-4">{{ error }}</v-alert>
 
-          <div class="modal-body">
-            
-            <template v-if="otpMode==='setup'">
-              <p class="mb-2">Секрет для приложения-аутентификатора:</p>
-              <div class="p-2 bg-light border rounded fw-semibold text-monospace user-select-all">
-                {{ otpSecretData?.secret }}
-              </div>
-              <p class="mt-3 mb-1">Отсканируйте QR/URI в приложении (Google Authenticator, Aegis и т.д.):</p>
-              <div class="small text-break">{{ otpSecretData?.otpauth_url }}</div>
-              <hr />
-              <p class="mb-2">После добавления введите 6-значный код:</p>
-              <input v-model="otpCode" maxlength="6" class="form-control" placeholder="Например, 123456" />
-              <div v-if="otpError" class="text-danger small mt-2">{{ otpError }}</div>
-            </template>
+    <v-card>
+      <v-card-text>
+        <v-form @submit.prevent="onSubmit">
+          <v-row class="mt-2" justify="center">
+            <v-col cols="12" md="6">
+              <v-text-field v-model="form.username" label="Логин" autocomplete="username" />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="form.password"
+                :type="showPass? 'text':'password'"
+                label="Пароль"
+                autocomplete="current-password"
+                :append-inner-icon="showPass? 'mdi-eye-off':'mdi-eye'"
+                @click:append-inner="showPass=!showPass"
+              />
+            </v-col>
+            <v-col cols="12" md="6" class="mt-2">
+              <v-btn type="submit" color="primary" block :loading="loading">Войти</v-btn>
+            </v-col>
+          </v-row>
+        </v-form>
+      </v-card-text>
+    </v-card>
 
-            
-            <template v-else>
-              <p class="mb-2">Введите 6-значный код из приложения-аутентификатора:</p>
-              <input v-model="otpCode" maxlength="6" class="form-control" placeholder="Код 2FA" />
-              <div v-if="otpError" class="text-danger small mt-2">{{ otpError }}</div>
-            </template>
-          </div>
-
-          <div class="modal-footer">
-            <button class="btn btn-secondary" type="button" @click="closeOtp">Отмена</button>
-            <button class="btn btn-primary" type="button" :disabled="otpLoading" @click="submitOtp">
-              {{ otpLoading ? "Проверяем..." : "Подтвердить" }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-  </div>
+    <v-dialog v-model="otpOpen" persistent max-width="480">
+      <v-card>
+        <v-card-title class="text-h6">{{ otpMode==='verify' ? 'Подтверждение входа (2FA)' : 'Привязка 2FA' }}</v-card-title>
+        <v-card-text>
+          <template v-if="otpMode==='setup'">
+            <div class="mb-2">Секрет для приложения-аутентификатора:</div>
+            <v-sheet class="pa-2 rounded" color="grey-lighten-4">{{ otpSecretData?.secret }}</v-sheet>
+            <div class="mt-3 mb-1">URI:</div>
+            <div class="text-body-2 text-break">{{ otpSecretData?.otpauth_url }}</div>
+            <v-divider class="my-4" />
+            <div class="mb-2">Введите 6-значный код:</div>
+            <v-text-field v-model="otpCode" maxlength="6" placeholder="Например, 123456" />
+            <div v-if="otpError" class="text-error text-body-2 mt-2">{{ otpError }}</div>
+          </template>
+          <template v-else>
+            <div class="mb-2">Введите 6-значный код из приложения:</div>
+            <v-text-field v-model="otpCode" maxlength="6" placeholder="Код 2FA" />
+            <div v-if="otpError" class="text-error text-body-2 mt-2">{{ otpError }}</div>
+          </template>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="otpOpen=false">Отмена</v-btn>
+          <v-btn color="primary" :loading="otpLoading" @click="submitOtp">Подтвердить</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+  </v-container>
 </template>
 
 <script setup>
-import { ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import "bootstrap/dist/js/bootstrap.bundle.min.js";
-import "@/styles/admin.css";
+import { ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import { login as apiLogin, me, otpStatus, otpSecret as apiOtpSecret, otpLogin } from '@/api'
 
-import { login as apiLogin, me, otpStatus, otpSecret as apiOtpSecret, otpLogin } from "@/api";
+const router = useRouter()
+const route = useRoute()
+const store = useUserStore()
 
-const router = useRouter();
-const route = useRoute();
+const form = ref({ username: '', password: '' })
+const loading = ref(false)
+const error = ref('')
+const showPass = ref(false)
 
-const form = ref({ username: "", password: "" });
-const loading = ref(false);
-const error = ref("");
+const otpOpen = ref(false)
+const otpMode = ref('verify')
+const otpCode = ref('')
+const otpLoading = ref(false)
+const otpError = ref('')
+const otpSecretData = ref(null)
 
+function openOtp(){ otpError.value=''; otpCode.value=''; otpOpen.value=true }
+function goNext(){ const next = (route.query.next && String(route.query.next)) || '/menu'; router.replace(next) }
 
-const otpModalRef = ref(null);
-let otpModal = null;
-const otpMode = ref("verify");        
-const otpCode = ref("");
-const otpLoading = ref(false);
-const otpError = ref("");
-const otpSecretData = ref(null);
-
-function openOtp() {
-  if (!otpModal && otpModalRef.value) {
-    otpModal = window.bootstrap.Modal.getOrCreateInstance(otpModalRef.value, { backdrop: "static" });
+async function afterLogin2FA(){
+  const st = await otpStatus()
+  if (!st.confirmed){
+    otpMode.value='setup'
+    otpSecretData.value = await apiOtpSecret()
+    openOtp()
+    return
   }
-  otpError.value = "";
-  otpCode.value = "";
-  otpModal?.show();
-}
-function closeOtp() {
-  otpModal?.hide();
-}
-
-async function afterLogin2FA() {
-  
-  const st = await otpStatus();
-
-  if (!st.confirmed) {
-    otpMode.value = "setup";
-    otpSecretData.value = await apiOtpSecret(); 
-    openOtp();
-    return;
+  if (!st.otp_good){
+    otpMode.value='verify'
+    openOtp()
+    return
   }
- 
-  if (!st.otp_good) {
-    otpMode.value = "verify";
-    openOtp();
-    return;
-  }
- 
-  goNext();
+  await store.restore()
+  goNext()
 }
 
-function goNext() {
-  const next = (route.query.next && String(route.query.next)) || "/menu";
-  router.replace(next);
-}
-
-async function submitOtp() {
-  otpLoading.value = true;
-  otpError.value = "";
-  try {
-    const code = otpCode.value.replace(/\s+/g, "");
-    if (!/^\d{6}$/.test(code)) {
-      otpError.value = "Введите 6-значный код.";
-      return;
-    }
-    const res = await otpLogin(code); 
-    if (!res || (res.success === false)) {
-      otpError.value = "Неверный код. Попробуйте ещё раз.";
-      return;
-    }
-    closeOtp();
-    goNext();
-  } catch (e) {
-    otpError.value = "Не удалось подтвердить код.";
-  } finally {
-    otpLoading.value = false;
+async function submitOtp(){
+  otpLoading.value = true
+  otpError.value = ''
+  try{
+    const code = String(otpCode.value||'').replace(/\s+/g,'')
+    if (!/^\d{6}$/.test(code)){ otpError.value='Введите 6-значный код.'; return }
+    const res = await otpLogin(code)
+    if (!res || (res.success===false)){ otpError.value='Неверный код. Попробуйте ещё раз.'; return }
+    await store.restore()
+    otpOpen.value = false
+    goNext()
+  }catch{
+    otpError.value='Не удалось подтвердить код.'
+  }finally{
+    otpLoading.value=false
   }
 }
 
-async function onSubmit() {
-  loading.value = true;
-  error.value = "";
-  try {
-    const resp = await apiLogin(form.value.username.trim(), form.value.password);
-    const ok = !!(resp && (resp.ok || resp.success));
-    if (!ok) throw new Error("bad creds");
-
-  
-    await me();
-
- 
-    await afterLogin2FA();
-  } catch (_) {
-    error.value = "Не удалось войти. Проверьте логин и пароль.";
-  } finally {
-    loading.value = false;
+async function onSubmit(){
+  loading.value = true
+  error.value = ''
+  try{
+    const resp = await apiLogin(form.value.username.trim(), form.value.password)
+    const ok = !!(resp && (resp.ok || resp.success))
+    if (!ok) throw new Error('bad creds')
+    await me()
+    await afterLogin2FA()
+  }catch{
+    error.value = 'Не удалось войти. Проверьте логин и пароль.'
+  }finally{
+    loading.value = false
   }
 }
 </script>

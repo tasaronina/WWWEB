@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import serializers
 
-OTP_TTL_SECONDS = 300  # 5 минут
+OTP_TTL_SECONDS = 300  
 
 def _otp_good_key(user_id: int) -> str:
     return f"otp_good:{user_id}"
@@ -29,7 +29,7 @@ class TwoFactorViewSet(GenericViewSet):
         secret_key = cache.get(_otp_secret_key(user.id))
         if not secret_key:
             secret_key = pyotp.random_base32()
-            # храним секрет в кэше (для учебного проекта этого достаточно)
+            # храним секрет в кэше
             cache.set(_otp_secret_key(user.id), secret_key, None)
 
         issuer = getattr(settings, "OTP_ISSUER", "CoffeeApp")
