@@ -4,6 +4,13 @@ import axios from "axios";
 import Cookies from "js-cookie";
 
 export const useUserStore = defineStore("userStore", () => {
+ 
+  const username = ref("");
+  const is_authenticated = ref(null); 
+  const is_staff = ref(false);
+  const second = ref(false);
+
+
   const userInfo = ref({
     is_authenticated: false,
     is_staff: false,
@@ -11,21 +18,22 @@ export const useUserStore = defineStore("userStore", () => {
     username: "",
   });
 
-  const second = ref(false);
-
   function applyCsrfFromCookies() {
-    const token = Cookies.get("csrftoken");
-    if (token) {
-      axios.defaults.headers.common["X-CSRFToken"] = token;
-    }
+    axios.defaults.headers.common["X-CSRFToken"] = Cookies.get("csrftoken");
   }
 
   async function fetchUserInfo() {
-   
     try {
       const r = await axios.get("/api/user/info/");
+
       userInfo.value = r.data;
+
+      username.value = r.data.username || "";
+      is_authenticated.value = r.data.is_authenticated;
+      is_staff.value = r.data.is_staff || false;
       second.value = r.data.second || false;
+
+      applyCsrfFromCookies();
     } catch (e) {
       userInfo.value = {
         is_authenticated: false,
@@ -33,20 +41,31 @@ export const useUserStore = defineStore("userStore", () => {
         second: false,
         username: "",
       };
+
+      username.value = "";
+      is_authenticated.value = false;
+      is_staff.value = false;
       second.value = false;
-    } finally {
+
       applyCsrfFromCookies();
     }
   }
 
-  async function login(username, password) {
-    await axios.post("/api/user/login/", { username, password });
+  async function checkLogin() {
+    await fetchUserInfo();
+  }
+
+  async function login(loginUsername, loginPassword) {
+    await axios.post("/api/user/login/", {
+      username: loginUsername,
+      password: loginPassword,
+    });
     await fetchUserInfo();
   }
 
   async function logout() {
     await axios.post("/api/user/logout/");
-    await fetchUserInfo(); // ✅ заново подтягиваем состояние + обновляем csrf
+    await fetchUserInfo();
   }
 
   onBeforeMount(async () => {
@@ -54,9 +73,17 @@ export const useUserStore = defineStore("userStore", () => {
   });
 
   return {
-    userInfo,
+  
+    username,
+    is_authenticated,
+    is_staff,
     second,
+
+    
+    userInfo,
+
     fetchUserInfo,
+    checkLogin,
     login,
     logout,
   };

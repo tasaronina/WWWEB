@@ -1,62 +1,66 @@
 <script setup>
+import { computed } from "vue";
 import { useUserStore } from "@/stores/user_store";
 import { storeToRefs } from "pinia";
+import { useRouter, useRoute } from "vue-router";
+
+const router = useRouter();
+const route = useRoute();
 
 const userStore = useUserStore();
 const { userInfo } = storeToRefs(userStore);
 
+const isAuth = computed(() => !!userInfo.value?.is_authenticated);
+const isAdmin = computed(() => !!userInfo.value?.is_authenticated && !!userInfo.value?.is_staff);
+
+const showLoginButton = computed(() => !isAuth.value && route.name !== "Login");
+
 async function handleLogout() {
   await userStore.logout();
+  router.push("/login");
 }
 </script>
 
 <template>
   <nav class="navbar navbar-expand-lg bg-body-tertiary">
     <div class="container">
-      <router-link class="navbar-brand" to="/">Кофейня</router-link>
+      <router-link class="navbar-brand" to="/menu">Кофейня</router-link>
 
       <button
         class="navbar-toggler"
         type="button"
         data-bs-toggle="collapse"
         data-bs-target="#navbarNav"
-        aria-controls="navbarNav"
-        aria-expanded="false"
-        aria-label="Toggle navigation"
       >
         <span class="navbar-toggler-icon"></span>
       </button>
 
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav me-auto">
-          <li class="nav-item">
-            <router-link class="nav-link" to="/">Главная</router-link>
-          </li>
-
+      
           <li class="nav-item">
             <router-link class="nav-link" to="/menu">Меню</router-link>
           </li>
 
-          <li v-if="userInfo?.is_authenticated && userInfo?.is_staff" class="nav-item">
+          <li v-if="isAdmin" class="nav-item">
             <router-link class="nav-link" to="/categories">Категории</router-link>
           </li>
-
-          <li v-if="userInfo?.is_authenticated && userInfo?.is_staff" class="nav-item">
+          <li v-if="isAdmin" class="nav-item">
             <router-link class="nav-link" to="/customers">Клиенты</router-link>
           </li>
-
-          <li v-if="userInfo?.is_authenticated" class="nav-item">
+          <li v-if="isAdmin" class="nav-item">
             <router-link class="nav-link" to="/orders">Заказы</router-link>
           </li>
-
-          <li v-if="userInfo?.is_authenticated && userInfo?.is_staff" class="nav-item">
+          <li v-if="isAdmin" class="nav-item">
             <router-link class="nav-link" to="/order-items">Позиции заказов</router-link>
           </li>
+
+          
         </ul>
 
         <ul class="navbar-nav">
-          <li v-if="userInfo?.is_authenticated" class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+          <li v-if="isAuth" class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
               Пользователь ({{ userInfo.username }})
             </a>
             <ul class="dropdown-menu dropdown-menu-end">
@@ -65,8 +69,8 @@ async function handleLogout() {
             </ul>
           </li>
 
-          <li v-else class="nav-item">
-            <span class="nav-link text-muted">Не авторизован</span>
+          <li v-else-if="showLoginButton" class="nav-item">
+            <router-link class="btn btn-outline-primary" to="/login">Войти</router-link>
           </li>
         </ul>
       </div>

@@ -1,21 +1,22 @@
 <script setup>
-import { computed, onBeforeMount, ref } from "vue";
-import { storeToRefs } from "pinia";
+import { onBeforeMount, ref } from "vue";
 import axios from "axios";
 
-import { useUserStore } from "@/stores/user_store";
-import { useDataStore } from "@/stores/data_store";
+const items = ref([]);
+const stats = ref(null);
+const categories = ref([]);
 
-const userStore = useUserStore();
-const dataStore = useDataStore();
-
-const { userInfo } = storeToRefs(userStore);
-const { menu, categories } = storeToRefs(dataStore);
+const filters = ref({
+  title: "",
+  group: "",
+  price_min: "",
+  price_max: "",
+});
 
 const createForm = ref({
   title: "",
   group: null,
-  price: 0,
+  price: "",
   description: "",
 });
 
@@ -23,242 +24,266 @@ const editForm = ref({
   id: null,
   title: "",
   group: null,
-  price: 0,
+  price: "",
   description: "",
 });
 
-const cartQty = ref({});
-const currentOrderId = ref(null);
+function buildQuery() {
+  const q = [];
+  if (filters.value.title) q.push("title=" + encodeURIComponent(filters.value.title));
+  if (filters.value.group) q.push("group=" + encodeURIComponent(filters.value.group));
+  if (filters.value.price_min) q.push("price_min=" + encodeURIComponent(filters.value.price_min));
+  if (filters.value.price_max) q.push("price_max=" + encodeURIComponent(filters.value.price_max));
+  return q.join("&");
+}
 
-const isAdmin = computed(() => !!userInfo.value?.is_authenticated && !!userInfo.value?.is_staff);
+async function fetchCategories() {
+  const r = await axios.get("/api/categories/");
+  categories.value = r.data || [];
+}
 
-onBeforeMount(async () => {
-  await userStore.checkLogin();
-  await dataStore.fetchCategories();
-  await dataStore.fetchMenu();
-});
+async function fetchItems() {
+  const r = await axios.get("/api/menu/", { params: filters.value });
+  items.value = r.data || [];
+}
 
-function groupNameById(id) {
-  return (categories.value || []).find((c) => c.id === id)?.name || "—";
+async function fetchStats() {
+  const r = await axios.get("/api/menu/stats/", { params: filters.value });
+  stats.value = r.data;
+}
+
+async function applyFilters() {
+  await fetchItems();
+  await fetchStats();
+}
+
+async function createItem() {
+  if (!createForm.value.title) return;
+  if (!createForm.value.group) return;
+
+  await axios.post("/api/menu/", {
+    title: createForm.value.title,
+    group: createForm.value.group,
+    price: createForm.value.price || "0",
+    description: createForm.value.description || "",
+  });
+
+  createForm.value = { title: "", group: null, price: "", description: "" };
+  await applyFilters();
 }
 
 function openEdit(m) {
   editForm.value = {
     id: m.id,
-    title: m.title || "",
-    group: m.group ?? null,
-    price: Number(m.price ?? 0),
+    title: m.title,
+    group: m.group,
+    price: m.price,
     description: m.description || "",
   };
-}
-
-async function createItem() {
-  const payload = {
-    title: createForm.value.title,
-    group: createForm.value.group,
-    price: createForm.value.price,
-    description: createForm.value.description,
-  };
-  await axios.post("/api/menu/", payload);
-  createForm.value = { title: "", group: null, price: 0, description: "" };
-  await dataStore.fetchMenu();
 }
 
 async function saveEdit() {
   const id = editForm.value.id;
   if (!id) return;
 
-  const payload = {
+  await axios.put(`/api/menu/${id}/`, {
     title: editForm.value.title,
     group: editForm.value.group,
-    price: editForm.value.price,
-    description: editForm.value.description,
-  };
+    price: editForm.value.price || "0",
+    description: editForm.value.description || "",
+  });
 
-  await axios.put(`/api/menu/${id}/`, payload);
-  await dataStore.fetchMenu();
+  await applyFilters();
 }
 
 async function deleteItem(id) {
-  if (!id) return;
   await axios.delete(`/api/menu/${id}/`);
-  await dataStore.fetchMenu();
+  await applyFilters();
 }
 
-async function addToCart(menuId) {
-  if (!userInfo.value?.is_authenticated) return;
-
-  const qty = Math.max(1, Number(cartQty.value[menuId] || 1));
-  const payload = {
-    menu_id: menuId,
-    qty,
-    order_id: currentOrderId.value || undefined,
-  };
-
-  const r = await axios.post("/api/orders/add-to-cart/", payload);
-  if (r?.data?.order_id) {
-    currentOrderId.value = r.data.order_id;
-  }
-  cartQty.value[menuId] = 1;
+function exportExcel() {
+  const qs = buildQuery();
+  window.location = "/api/menu/export-excel/" + (qs ? "?" + qs : "");
 }
+
+function exportWord() {
+  const qs = buildQuery();
+  window.location = "/api/menu/export-word/" + (qs ? "?" + qs : "");
+}
+
+function categoryTitle(id) {
+  return categories.value.find((c) => c.id === id)?.name || `#${id}`;
+}
+
+onBeforeMount(async () => {
+  await fetchCategories();
+  await applyFilters();
+});
 </script>
 
 <template>
   <div class="container mt-4">
-    <div class="d-flex align-items-center justify-content-between mb-3">
-      <h2 class="mb-0">Меню</h2>
-      <div class="text-muted" v-if="userInfo?.is_authenticated">
-        Роль: <strong>{{ userInfo.is_staff ? "Админ" : "Пользователь" }}</strong>
+    <h2 class="mb-3">Меню</h2>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="text-muted" v-if="stats">
+        Кол-во: <b>{{ stats.count }}</b>,
+        Средняя цена: <b>{{ stats.avg }}</b>,
+        Мин: <b>{{ stats.min }}</b>,
+        Макс: <b>{{ stats.max }}</b>
+      </div>
+
+      <!-- ✅ экспорт только тут -->
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-success btn-sm" @click="exportExcel">Excel</button>
+        <button class="btn btn-outline-primary btn-sm" @click="exportWord">Word</button>
       </div>
     </div>
 
-
-    <div class="card mb-4" v-if="isAdmin">
-      <div class="card-header bg-primary text-white">
-        Добавить позицию меню
-      </div>
+    <div class="card mb-3">
+      <div class="card-header">Добавить позицию меню</div>
       <div class="card-body">
         <form class="row g-2" @submit.prevent="createItem">
           <div class="col-md-4">
-            <input v-model="createForm.title" class="form-control" placeholder="Название" required />
+            <label class="form-label">Название</label>
+            <input class="form-control" v-model="createForm.title" />
           </div>
 
           <div class="col-md-3">
-            <select v-model="createForm.group" class="form-select">
-              <option :value="null">Без категории</option>
+            <label class="form-label">Категория</label>
+            <select class="form-select" v-model="createForm.group">
+              <option :value="null">—</option>
               <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
             </select>
           </div>
 
           <div class="col-md-2">
-            <input v-model.number="createForm.price" class="form-control" type="number" step="0.01" placeholder="Цена" />
+            <label class="form-label">Цена</label>
+            <input class="form-control" v-model="createForm.price" />
           </div>
 
           <div class="col-md-3">
-            <input v-model="createForm.description" class="form-control" placeholder="Описание" />
+            <label class="form-label">Описание</label>
+            <input class="form-control" v-model="createForm.description" />
           </div>
 
-          <div class="col-12 text-end">
-            <button class="btn btn-primary" type="submit">Добавить</button>
+          <div class="col-12 d-flex justify-content-end">
+            <button class="btn btn-primary">Добавить</button>
           </div>
         </form>
       </div>
     </div>
 
+    <div class="card mb-3">
+      <div class="card-header">Фильтры</div>
+      <div class="card-body">
+        <form class="row g-2" @submit.prevent="applyFilters">
+          <div class="col-md-4">
+            <label class="form-label">Название</label>
+            <input class="form-control" v-model="filters.title" />
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Категория (id)</label>
+            <input class="form-control" v-model="filters.group" />
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Цена от</label>
+            <input class="form-control" v-model="filters.price_min" />
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Цена до</label>
+            <input class="form-control" v-model="filters.price_max" />
+          </div>
+
+          <div class="col-md-2 d-flex align-items-end justify-content-end">
+            <button class="btn btn-primary">Применить</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <div class="card">
-      <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
-        <span>Список позиций</span>
-        <span class="text-muted">Всего: {{ menu.length }}</span>
-      </div>
+      <div class="card-header">Таблица</div>
+      <div class="card-body table-responsive">
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th style="width: 90px;">ID</th>
+              <th>Название</th>
+              <th style="width: 220px;">Категория</th>
+              <th style="width: 130px;">Цена</th>
+              <th style="width: 220px;">Действия</th>
+            </tr>
+          </thead>
 
-      <div class="card-body">
-        <div class="table-responsive">
-          <table class="table table-striped align-middle">
-            <thead>
-              <tr>
-                <th style="width: 70px;">ID</th>
-                <th>Название</th>
-                <th style="width: 220px;">Категория</th>
-                <th style="width: 140px;">Цена</th>
-                <th style="width: 260px;">Действия</th>
-              </tr>
-            </thead>
+          <tbody>
+            <tr v-for="m in items" :key="m.id">
+              <td>#{{ m.id }}</td>
+              <td>{{ m.title }}</td>
+              <td>{{ categoryTitle(m.group) }}</td>
+              <td>{{ m.price }}</td>
+              <td class="d-flex gap-2">
+                <button
+                  class="btn btn-sm btn-outline-secondary"
+                  data-bs-toggle="modal"
+                  data-bs-target="#editMenuModal"
+                  @click="openEdit(m)"
+                >
+                  Редактировать
+                </button>
+                <button class="btn btn-sm btn-outline-danger" @click="deleteItem(m.id)">
+                  Удалить
+                </button>
+              </td>
+            </tr>
 
-            <tbody>
-              <tr v-for="m in menu" :key="m.id">
-                <td>{{ m.id }}</td>
-                <td>
-                  <div class="fw-semibold">{{ m.title }}</div>
-                  <div class="text-muted small">{{ m.description }}</div>
-                </td>
-                <td>{{ groupNameById(m.group) }}</td>
-                <td>{{ m.price }}</td>
-
-                <td>
-                  
-                  <div v-if="userInfo?.is_authenticated && !isAdmin" class="d-flex gap-2">
-                    <input
-                      class="form-control form-control-sm"
-                      type="number"
-                      min="1"
-                      style="width: 90px;"
-                      v-model.number="cartQty[m.id]"
-                      placeholder="qty"
-                    />
-                    <button class="btn btn-sm btn-success" @click="addToCart(m.id)">
-                      Добавить
-                    </button>
-                  </div>
-
-               
-                  <div v-if="isAdmin" class="d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editMenuModal" @click="openEdit(m)">
-                      Редактировать
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger" @click="deleteItem(m.id)">
-                      Удалить
-                    </button>
-                  </div>
-
-                  <div v-if="!userInfo?.is_authenticated" class="text-muted small">
-                    Войдите, чтобы добавлять в заказы
-                  </div>
-                </td>
-              </tr>
-
-              <tr v-if="menu.length === 0">
-                <td colspan="5" class="text-center text-muted">Пока нет позиций меню</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="alert alert-info mt-3" v-if="userInfo?.is_authenticated && !isAdmin">
-          <div>Если ты добавляешь позиции — они попадут в один “текущий заказ”.</div>
-          <div class="small text-muted">order_id: {{ currentOrderId || "ещё не создан" }}</div>
-        </div>
+            <tr v-if="items.length === 0">
+              <td colspan="6" class="text-muted text-center">Нет данных</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
 
-    <div class="modal fade" id="editMenuModal" tabindex="-1" aria-hidden="true" v-if="isAdmin">
+    <div class="modal fade" id="editMenuModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
+
           <div class="modal-header">
             <h5 class="modal-title">Редактировать позицию меню</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
 
           <div class="modal-body">
             <form class="row g-2" @submit.prevent.stop="saveEdit">
-              <div class="col-md-6">
+              <div class="col-md-5">
                 <label class="form-label">Название</label>
-                <input v-model="editForm.title" class="form-control" required />
+                <input class="form-control" v-model="editForm.title" />
               </div>
 
-              <div class="col-md-6">
+              <div class="col-md-3">
                 <label class="form-label">Категория</label>
-                <select v-model="editForm.group" class="form-select">
-                  <option :value="null">Без категории</option>
+                <select class="form-select" v-model="editForm.group">
                   <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
                 </select>
               </div>
 
-              <div class="col-md-4">
+              <div class="col-md-2">
                 <label class="form-label">Цена</label>
-                <input v-model.number="editForm.price" type="number" step="0.01" class="form-control" />
+                <input class="form-control" v-model="editForm.price" />
               </div>
 
-              <div class="col-md-8">
+              <div class="col-md-2">
                 <label class="form-label">Описание</label>
-                <input v-model="editForm.description" class="form-control" />
+                <input class="form-control" v-model="editForm.description" />
               </div>
 
-              <div class="col-12 text-end mt-2">
-                <button class="btn btn-primary" type="submit" data-bs-dismiss="modal">
-                  Сохранить
-                </button>
+              <div class="col-12 text-end">
+                <button class="btn btn-primary" type="submit" data-bs-dismiss="modal">Сохранить</button>
               </div>
             </form>
           </div>

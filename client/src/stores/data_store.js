@@ -7,36 +7,38 @@ export const useDataStore = defineStore("dataStore", () => {
   const menu = ref([]);
   const customers = ref([]);
   const orders = ref([]);
-  const orderItems = ref([]);
+  const myOrders = ref([]);
 
-  async function fetchCategories() {
-    const r = await axios.get("/api/categories");
-    categories.value = r.data;
-    return r.data;
+  const menuStats = ref(null);
+
+  async function fetchCategories(params = {}) {
+    const r = await axios.get("/api/categories/", { params });
+    categories.value = r.data || [];
   }
 
-  async function fetchMenu() {
-    const r = await axios.get("/api/menu");
-    menu.value = r.data;
-    return r.data;
+  async function fetchMenu(params = {}) {
+    const r = await axios.get("/api/menu/", { params });
+    menu.value = r.data || [];
   }
 
-  async function fetchCustomers() {
-    const r = await axios.get("/api/customers");
-    customers.value = r.data;
-    return r.data;
+  async function fetchCustomers(params = {}) {
+    const r = await axios.get("/api/customers/", { params });
+    customers.value = r.data || [];
   }
 
-  async function fetchOrders() {
-    const r = await axios.get("/api/orders");
-    orders.value = r.data;
-    return r.data;
+  async function fetchOrders(params = {}) {
+    const r = await axios.get("/api/orders/", { params });
+    orders.value = r.data || [];
   }
 
-  async function fetchOrderItems() {
-    const r = await axios.get("/api/order-items");
-    orderItems.value = r.data;
-    return r.data;
+  async function fetchMyOrders(params = {}) {
+    const r = await axios.get("/api/orders/", { params });
+    myOrders.value = r.data || [];
+  }
+
+  async function fetchMenuStats() {
+    const r = await axios.get("/api/menu/stats/");
+    menuStats.value = r.data;
   }
 
   return {
@@ -44,12 +46,14 @@ export const useDataStore = defineStore("dataStore", () => {
     menu,
     customers,
     orders,
-    orderItems,
+    myOrders,
+    menuStats,
 
     fetchCategories,
     fetchMenu,
     fetchCustomers,
     fetchOrders,
-    fetchOrderItems,
+    fetchMyOrders,
+    fetchMenuStats,
   };
 });
