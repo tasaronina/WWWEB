@@ -1,6 +1,5 @@
 from django.db import models
-from django.conf import settings  
-
+from django.conf import settings
 
 class Category(models.Model):
     name = models.TextField("Название")
@@ -14,36 +13,32 @@ class Category(models.Model):
 
 
 class Menu(models.Model):
-    name = models.TextField("Название")
+    title = models.TextField("Название")
     group = models.ForeignKey(
-        "Category",
+        Category,
         on_delete=models.CASCADE,
-        null=True,
         verbose_name="Категория",
-        related_name="menus",
+        related_name="items",
+        null=True,
+        blank=True,
     )
     price = models.DecimalField("Цена", max_digits=10, decimal_places=2, default=0)
-    picture = models.ImageField("Изображение", upload_to="menus", null=True, blank=True)
+    description = models.TextField("Описание", blank=True, default="")
+    picture = models.ImageField("Изображение", null=True, blank=True, upload_to="menus")
 
     class Meta:
         verbose_name = "Позиция меню"
         verbose_name_plural = "Позиции меню"
 
     def __str__(self) -> str:
-        return self.name
+        return self.title
 
 
 class Customer(models.Model):
-    name = models.TextField("Имя")
-    phone = models.TextField("Телефон", null=True, blank=True)
-    picture = models.ImageField("Аватар", upload_to="customers", null=True, blank=True)
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        verbose_name="Пользователь",
-    )
+    name = models.TextField("ФИО")
+    phone = models.TextField("Телефон", blank=True, null=True)
+    email = models.EmailField("Email", blank=True, null=True)
+    picture = models.ImageField("Аватар", null=True, blank=True, upload_to="customers")
 
     class Meta:
         verbose_name = "Клиент"
@@ -55,30 +50,33 @@ class Customer(models.Model):
 
 class Order(models.Model):
     STATUS_CHOICES = [
-        ("DRAFT", "Черновик"),    
         ("NEW", "Новый"),
         ("IN_PROGRESS", "В работе"),
         ("DONE", "Готов"),
         ("CANCELLED", "Отменён"),
     ]
 
-    customer = models.ForeignKey(
-        Customer,
-        on_delete=models.CASCADE,
-        verbose_name="Клиент",
-        related_name="orders",
-        null=True,
-        blank=True,               
-    )
     created_at = models.DateTimeField("Создан", auto_now_add=True)
-    status = models.CharField("Статус", choices=STATUS_CHOICES, default="DRAFT", max_length=20)
+    status = models.CharField("Статус", max_length=20, choices=STATUS_CHOICES, default="NEW")
+
+  
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        related_name="orders",
+        verbose_name="Пользователь",
         null=True,
         blank=True,
-        verbose_name="Пользователь",
+    )
+
+    # “клиент” как сущность кофейни (для админа/кассира)
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.SET_NULL,
         related_name="orders",
+        verbose_name="Клиент",
+        null=True,
+        blank=True,
     )
 
     class Meta:
@@ -87,21 +85,26 @@ class Order(models.Model):
         ordering = ("-id",)
 
     def __str__(self) -> str:
-        return f"Заказ #{self.pk or ''}".strip()
+        return f"Заказ #{self.id}"
 
 
 class OrderItem(models.Model):
     order = models.ForeignKey(
-        Order, on_delete=models.CASCADE, verbose_name="Заказ", related_name="items"
+        Order,
+        on_delete=models.CASCADE,
+        related_name="items",
+        verbose_name="Заказ",
     )
+
     menu = models.ForeignKey(
         Menu,
         on_delete=models.PROTECT,
-        verbose_name="Позиция меню",
         related_name="order_items",
-        null=True,                 
+        verbose_name="Позиция меню",
+        null=True,
         blank=True,
     )
+
     qty = models.PositiveIntegerField("Количество", default=1)
 
     class Meta:
@@ -109,16 +112,13 @@ class OrderItem(models.Model):
         verbose_name_plural = "Позиции заказа"
 
     def __str__(self) -> str:
-        return f"{self.menu} × {self.qty}"
-
+        return f"{self.menu.title if self.menu else '—'} × {self.qty}"
 
 class Profile(models.Model):
-    ROLE_USER = "USER"
-    ROLE_ADMIN = "ADMIN"
-    ROLE_CHOICES = (
-        (ROLE_USER, "Пользователь"),
-        (ROLE_ADMIN, "Админ"),
-    )
+    ROLE_CHOICES = [
+        ("USER", "Пользователь"),
+        ("ADMIN", "Администратор"),
+    ]
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -126,14 +126,14 @@ class Profile(models.Model):
         related_name="profile",
         verbose_name="Пользователь",
     )
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=ROLE_USER)
+    role = models.CharField("Роль", max_length=10, choices=ROLE_CHOICES, default="USER")
 
- 
-    opt_key = models.CharField("OTP-секрет", max_length=64, blank=True, null=True)
+
+    opt_key = models.CharField("OTP ключ", max_length=64, blank=True, default="")
 
     class Meta:
         verbose_name = "Профиль"
         verbose_name_plural = "Профили"
 
-    def __str__(self):
-        return f"Profile<{self.user.username}>"
+    def __str__(self) -> str:
+        return f"Профиль {self.user.username}"

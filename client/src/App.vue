@@ -1,53 +1,100 @@
-<template>
-  <v-app>
-    <v-app-bar density="comfortable" v-if="appReady && route.path !== '/login'">
-      <v-container class="d-flex align-center justify-space-between" fluid>
-        <RouterLink :to="{name:'menu'}" class="text-high-emphasis text-decoration-none">
-          <span class="text-h6">Кофейня</span>
-        </RouterLink>
-        <div class="d-flex align-center ga-2">
-          <v-btn variant="text" :to="{name:'menu'}" :class="{ 'font-weight-bold': route.name==='menu' }">Меню</v-btn>
-          <v-btn v-if="store.isAuthed && !isAdmin" variant="text" :to="{name:'my-orders'}" :class="{ 'font-weight-bold': route.name==='my-orders' }">Мои заказы</v-btn>
-          <v-btn v-if="store.isAuthed && isAdmin" variant="text" :to="{name:'orders'}" :class="{ 'font-weight-bold': route.name==='orders' }">Заказы (админ)</v-btn>
-          <v-btn v-if="store.isAuthed && isAdmin" variant="text" :to="{name:'categories'}" :class="{ 'font-weight-bold': route.name==='categories' }">Категории</v-btn>
-          <v-btn v-if="store.isAuthed && isAdmin" variant="text" :to="{name:'customers'}" :class="{ 'font-weight-bold': route.name==='customers' }">Клиенты</v-btn>
-          <v-btn v-if="store.isAuthed && isAdmin" variant="text" :to="{name:'order-items'}" :class="{ 'font-weight-bold': route.name==='order-items' }">Позиции заказов</v-btn>
-        </div>
-        <div class="d-flex align-center ga-3">
-          <span v-if="store.isAuthed" class="text-medium-emphasis">{{ store.username }}</span>
-          <v-btn v-if="store.isAuthed" color="primary" variant="outlined" size="small" @click="onLogout">Выйти</v-btn>
-          <v-btn v-else color="primary" variant="outlined" size="small" :to="{name:'login'}">Войти</v-btn>
-        </div>
-      </v-container>
-    </v-app-bar>
-
-    <v-main>
-      <div v-if="!appReady" class="pa-6">
-        <v-progress-linear indeterminate />
-      </div>
-      <RouterView v-else :key="route.fullPath" />
-    </v-main>
-  </v-app>
-</template>
-
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { useUserStore } from '@/stores/user'
+import axios from "axios";
+import Cookies from "js-cookie";
+import { onBeforeMount } from "vue";
+import { useUserStore } from "@/stores/user_store";
+import { storeToRefs } from "pinia";
 
-const store = useUserStore()
-const route = useRoute()
+const userStore = useUserStore();
+const { userInfo } = storeToRefs(userStore);
 
-const appReady = ref(false)
-onMounted(async () => {
-  try { await store.restore() } finally { appReady.value = true }
+async function handleLogout() {
+  await userStore.logout();
+}
+
+
+onBeforeMount(() => {
+  axios.defaults.headers.common['X-CSRFToken'] = Cookies.get("csrftoken");
 })
 
-const isAdmin = computed(() => Boolean(store.user?.is_staff || store.user?.is_superuser))
-function onLogout(){ store.logout() }
 </script>
 
-<style scoped>
-.text-decoration-none{ text-decoration: none }
-.font-weight-bold{ font-weight: 600 }
-</style>
+<template>
+  <nav class="navbar navbar-expand-lg bg-body-tertiary">
+    <div class="container">
+      <router-link class="navbar-brand" to="/">Кофейня</router-link>
+
+      <button
+        class="navbar-toggler"
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#navbarNav"
+        aria-controls="navbarNav"
+        aria-expanded="false"
+        aria-label="Toggle navigation"
+      >
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav me-auto">
+          <li class="nav-item">
+            <router-link class="nav-link" to="/">Главная</router-link>
+          </li>
+
+          <li class="nav-item">
+            <router-link class="nav-link" to="/menu">Меню</router-link>
+          </li>
+
+          <li v-if="userInfo && userInfo.is_authenticated && userInfo.is_staff" class="nav-item">
+            <router-link class="nav-link" to="/categories">Категории</router-link>
+          </li>
+
+          <li v-if="userInfo && userInfo.is_authenticated && userInfo.is_staff" class="nav-item">
+            <router-link class="nav-link" to="/customers">Клиенты</router-link>
+          </li>
+
+          <li v-if="userInfo && userInfo.is_authenticated" class="nav-item">
+            <router-link class="nav-link" to="/orders">Заказы</router-link>
+          </li>
+
+          <li v-if="userInfo && userInfo.is_authenticated && userInfo.is_staff" class="nav-item">
+            <router-link class="nav-link" to="/order-items">Позиции заказов</router-link>
+          </li>
+        </ul>
+
+        <ul class="navbar-nav">
+          <li v-if="userInfo && userInfo.is_authenticated" class="nav-item dropdown">
+            <a
+              class="nav-link dropdown-toggle"
+              href="#"
+              role="button"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+            >
+              Пользователь
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li>
+                <a class="dropdown-item" href="/admin">Админка</a>
+              </li>
+              <li>
+                <a class="dropdown-item" href="#" @click.prevent="handleLogout">Выйти</a>
+              </li>
+            </ul>
+          </li>
+
+          <li v-else class="nav-item">
+            <span class="nav-link text-muted">Не авторизован</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <router-view />
+  </div>
+</template>
+
+<style scoped></style>

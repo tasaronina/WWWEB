@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Кофейня</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+  <div class="container mt-3">
+    <h1 class="text-center">Кофейня</h1>
+    <hr>
+
+    <div class="card mb-4">
+      <div class="card-header bg-success text-white">
+        <h2>Категории</h2>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          {% for c in categories %}
+          <div class="col-md-4 mb-3">
+            <div class="card">
+              <div class="card-body">
+                <h5 class="card-title">{{ c.name }}</h5>
+                <p class="card-text">ID: {{ c.id }}</p>
+              </div>
+            </div>
+          </div>
+          {% empty %}
+          <p class="text-muted">Категорий нет</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header bg-warning">
+        <h2>Меню</h2>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          {% for m in menu_items %}
+          <div class="col-md-6 mb-3">
+            <div class="card">
+              <div class="card-body">
+                <h5 class="card-title">{{ m.title }}</h5>
+                <p class="card-text">
+                  <strong>Категория:</strong> {% if m.group %}{{ m.group.name }}{% else %}—{% endif %}<br>
+                  <strong>Цена:</strong> {{ m.price }}<br>
+                  <strong>Описание:</strong> {{ m.description|default:"—" }}
+                </p>
+              </div>
+            </div>
+          </div>
+          {% empty %}
+          <p class="text-muted">Позиции меню отсутствуют</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header bg-info text-white">
+        <h2>Клиенты</h2>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          {% for cu in customers %}
+          <div class="col-md-4 mb-3">
+            <div class="card">
+              <div class="card-body">
+                <h5 class="card-title">{{ cu.name }}</h5>
+                <p class="card-text">
+                  <strong>Телефон:</strong> {{ cu.phone|default:"—" }}<br>
+                  <strong>Email:</strong> {{ cu.email|default:"—" }}
+                </p>
+              </div>
+            </div>
+          </div>
+          {% empty %}
+          <p class="text-muted">Клиентов нет</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header bg-secondary text-white">
+        <h2>Заказы</h2>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          {% for o in orders %}
+          <div class="col-md-6 mb-3">
+            <div class="card">
+              <div class="card-body">
+                <h5 class="card-title">Заказ #{{ o.id }}</h5>
+                <p class="card-text">
+                  <strong>Статус:</strong> {{ o.status }}<br>
+                  <strong>Пользователь:</strong> {% if o.user %}{{ o.user.username }}{% else %}—{% endif %}<br>
+                  <strong>Клиент:</strong> {% if o.customer %}{{ o.customer.name }}{% else %}—{% endif %}<br>
+                  <strong>Создан:</strong> {{ o.created_at }}
+                </p>
+              </div>
+            </div>
+          </div>
+          {% empty %}
+          <p class="text-muted">Заказов нет</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header bg-primary text-white">
+        <h2>Позиции заказов</h2>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          {% for it in orderitems %}
+          <div class="col-md-6 mb-3">
+            <div class="card">
+              <div class="card-body">
+                <h5 class="card-title">Позиция #{{ it.id }}</h5>
+                <p class="card-text">
+                  <strong>Заказ:</strong> #{{ it.order.id }}<br>
+                  <strong>Позиция меню:</strong> {% if it.menu %}{{ it.menu.title }}{% else %}—{% endif %}<br>
+                  <strong>Кол-во:</strong> {{ it.qty }}
+                </p>
+              </div>
+            </div>
+          </div>
+          {% empty %}
+          <p class="text-muted">Позиции заказов отсутствуют</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
