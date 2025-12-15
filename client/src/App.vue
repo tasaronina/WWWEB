@@ -1,7 +1,4 @@
 <script setup>
-import axios from "axios";
-import Cookies from "js-cookie";
-import { onBeforeMount } from "vue";
 import { useUserStore } from "@/stores/user_store";
 import { storeToRefs } from "pinia";
 
@@ -11,12 +8,6 @@ const { userInfo } = storeToRefs(userStore);
 async function handleLogout() {
   await userStore.logout();
 }
-
-
-onBeforeMount(() => {
-  axios.defaults.headers.common['X-CSRFToken'] = Cookies.get("csrftoken");
-})
-
 </script>
 
 <template>
@@ -46,41 +37,31 @@ onBeforeMount(() => {
             <router-link class="nav-link" to="/menu">Меню</router-link>
           </li>
 
-          <li v-if="userInfo && userInfo.is_authenticated && userInfo.is_staff" class="nav-item">
+          <li v-if="userInfo?.is_authenticated && userInfo?.is_staff" class="nav-item">
             <router-link class="nav-link" to="/categories">Категории</router-link>
           </li>
 
-          <li v-if="userInfo && userInfo.is_authenticated && userInfo.is_staff" class="nav-item">
+          <li v-if="userInfo?.is_authenticated && userInfo?.is_staff" class="nav-item">
             <router-link class="nav-link" to="/customers">Клиенты</router-link>
           </li>
 
-          <li v-if="userInfo && userInfo.is_authenticated" class="nav-item">
+          <li v-if="userInfo?.is_authenticated" class="nav-item">
             <router-link class="nav-link" to="/orders">Заказы</router-link>
           </li>
 
-          <li v-if="userInfo && userInfo.is_authenticated && userInfo.is_staff" class="nav-item">
+          <li v-if="userInfo?.is_authenticated && userInfo?.is_staff" class="nav-item">
             <router-link class="nav-link" to="/order-items">Позиции заказов</router-link>
           </li>
         </ul>
 
         <ul class="navbar-nav">
-          <li v-if="userInfo && userInfo.is_authenticated" class="nav-item dropdown">
-            <a
-              class="nav-link dropdown-toggle"
-              href="#"
-              role="button"
-              data-bs-toggle="dropdown"
-              aria-expanded="false"
-            >
-              Пользователь
+          <li v-if="userInfo?.is_authenticated" class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+              Пользователь ({{ userInfo.username }})
             </a>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li>
-                <a class="dropdown-item" href="/admin">Админка</a>
-              </li>
-              <li>
-                <a class="dropdown-item" href="#" @click.prevent="handleLogout">Выйти</a>
-              </li>
+              <li><a class="dropdown-item" href="/admin">Админка</a></li>
+              <li><a class="dropdown-item" href="#" @click.prevent="handleLogout">Выйти</a></li>
             </ul>
           </li>
 
