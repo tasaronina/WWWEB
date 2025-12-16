@@ -20,6 +20,9 @@ from .serializers import (
     OrderItemSerializer,
 )
 
+from .permissions import OTPRequiredForDelete
+
+
 try:
     from openpyxl import Workbook
 except Exception:
@@ -55,71 +58,95 @@ class UserViewSet(GenericViewSet):
         return LoginSerializer
 
     @action(detail=False, url_path="info", methods=["GET"])
-    def get_info(self, request, *args, **kwargs):
+    def info(self, request, *args, **kwargs):
         data = {
             "username": request.user.username if request.user.is_authenticated else "",
             "is_authenticated": request.user.is_authenticated,
             "is_staff": request.user.is_staff if request.user.is_authenticated else False,
+            "second": request.session.get("second") or False,
         }
-        if request.user.is_authenticated:
-            data["second"] = request.session.get("second") or False
         return Response(data)
 
     @action(detail=False, url_path="login", methods=["POST"])
     def login_user(self, request, *args, **kwargs):
-        ser = LoginSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
         user = authenticate(
-            username=ser.validated_data["username"],
-            password=ser.validated_data["password"],
+            username=serializer.validated_data["username"],
+            password=serializer.validated_data["password"],
         )
-        if user is not None:
-            login(request, user)
-            request.session["second"] = False
-            return Response({"success": True})
+        if user is None:
+            return Response({"success": False})
 
-        return Response({"success": False})
+        login(request, user)
+        request.session["second"] = False
 
-    @action(detail=False, url_path="logout", methods=["POST"], permission_classes=[permissions.IsAuthenticated])
+        return Response({"success": True})
+
+    @action(
+        detail=False,
+        url_path="logout",
+        methods=["POST"],
+        permission_classes=[permissions.IsAuthenticated],
+    )
     def logout_user(self, request, *args, **kwargs):
         logout(request)
-        return Response({"status": "success"})
+        return Response({"success": True})
 
-    @action(detail=False, url_path="get-totp", methods=["GET"], permission_classes=[permissions.IsAuthenticated])
+    @action(
+        detail=False,
+        url_path="get-totp",
+        methods=["GET"],
+        permission_classes=[permissions.IsAuthenticated],
+    )
     def get_totp(self, request, *args, **kwargs):
         profile, _ = Profile.objects.get_or_create(user=request.user)
-        profile.opt_key = pyotp.random_base32()
-        profile.save()
 
-        url = pyotp.totp.TOTP(profile.opt_key).provisioning_uri(
+        if not profile.opt_key:
+            profile.opt_key = pyotp.random_base32()
+            profile.save()
+
+        totp = pyotp.TOTP(profile.opt_key)
+        url = totp.provisioning_uri(
             name=request.user.username,
             issuer_name="CafeApp",
         )
+
         return Response({"url": url})
 
-    @action(detail=False, url_path="second-login", methods=["POST"], permission_classes=[permissions.IsAuthenticated])
+    @action(
+        detail=False,
+        url_path="second-login",
+        methods=["POST"],
+        permission_classes=[permissions.IsAuthenticated],
+    )
     def second_login(self, request, *args, **kwargs):
-        ser = SecondLoginSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
+        serializer = SecondLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        profile, _ = Profile.objects.get_or_create(user=request.user)
+        profile = Profile.objects.filter(user=request.user).first()
+        if not profile:
+            return Response({"success": False})
+
         if not profile.opt_key:
             return Response({"success": False})
 
-        t = pyotp.totp.TOTP(profile.opt_key)
-        code = ser.validated_data["key"].strip()
+        totp = pyotp.TOTP(profile.opt_key)
+        code = serializer.validated_data["key"].strip()
 
-        if code == t.now():
+        if totp.verify(code):
             request.session["second"] = True
+            request.session.set_expiry(300)
             return Response({"success": True})
 
         return Response({"success": False})
+
 
 class CategoryViewSet(ModelViewSet):
     queryset = Category.objects.all().order_by("-id")
     serializer_class = CategorySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, OTPRequiredForDelete]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -182,10 +209,11 @@ class CategoryViewSet(ModelViewSet):
         doc.save(resp)
         return resp
 
+
 class MenuViewSet(ModelViewSet):
     queryset = Menu.objects.all().order_by("-id")
     serializer_class = MenuSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, OTPRequiredForDelete]
 
     def get_queryset(self):
         qs = Menu.objects.all().order_by("-id")
@@ -274,10 +302,11 @@ class MenuViewSet(ModelViewSet):
         doc.save(resp)
         return resp
 
+
 class CustomerViewSet(ModelViewSet):
     queryset = Customer.objects.all().order_by("-id")
     serializer_class = CustomerSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, OTPRequiredForDelete]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -345,10 +374,11 @@ class CustomerViewSet(ModelViewSet):
         doc.save(resp)
         return resp
 
+
 class OrderViewSet(ModelViewSet):
     queryset = Order.objects.all().order_by("-id")
     serializer_class = OrderSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, OTPRequiredForDelete]
 
     def get_queryset(self):
         qs = Order.objects.all().order_by("-id")
@@ -439,10 +469,11 @@ class OrderViewSet(ModelViewSet):
         doc.save(resp)
         return resp
 
+
 class OrderItemViewSet(ModelViewSet):
     queryset = OrderItem.objects.all().order_by("-id")
     serializer_class = OrderItemSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, OTPRequiredForDelete]
 
     def get_queryset(self):
         qs = OrderItem.objects.all().order_by("-id")

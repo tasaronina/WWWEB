@@ -1,9 +1,19 @@
 <script setup>
 import { onBeforeMount, ref } from "vue";
 import axios from "axios";
+import { useUserStore } from "@/stores/user_store";
+import QRCode from "qrcode";
+
+const userStore = useUserStore();
 
 const items = ref([]);
 const stats = ref(null);
+
+const userInfo = ref({
+  is_authenticated: false,
+  is_staff: false,
+  second: false,
+});
 
 const orders = ref([]);
 const menu = ref([]);
@@ -27,6 +37,30 @@ const editForm = ref({
   menu: null,
   qty: 1,
 });
+
+const totpDialogVisible = ref(false);
+const totpUrl = ref("");
+const qrDataUrl = ref("");
+const totpCode = ref("");
+const totpError = ref(false);
+const pendingDeleteId = ref(null);
+
+async function buildQr(u) {
+  if (!u) {
+    qrDataUrl.value = "";
+    return;
+  }
+
+  qrDataUrl.value = await QRCode.toDataURL(u, {
+    width: 220,
+    margin: 1,
+  });
+}
+
+async function fetchUserInfo() {
+  const r = await axios.get("/api/user/info/");
+  userInfo.value = r.data || userInfo.value;
+}
 
 async function fetchOrders() {
   const r = await axios.get("/api/orders/");
@@ -89,16 +123,68 @@ async function saveEdit() {
   await applyFilters();
 }
 
+async function openTotpDialog(deleteId) {
+  pendingDeleteId.value = deleteId;
+  totpDialogVisible.value = true;
+  totpError.value = false;
+  totpCode.value = "";
+  totpUrl.value = "";
+  qrDataUrl.value = "";
+
+  const u = await userStore.getTotp();
+  totpUrl.value = u || "";
+  await buildQr(totpUrl.value);
+}
+
+function closeTotpDialog() {
+  totpDialogVisible.value = false;
+  totpError.value = false;
+  totpCode.value = "";
+  totpUrl.value = "";
+  qrDataUrl.value = "";
+  pendingDeleteId.value = null;
+}
+
+async function confirmTotpAndDelete() {
+  totpError.value = false;
+
+  const ok = await userStore.verifyTotp(totpCode.value);
+  await fetchUserInfo();
+
+  if (!ok) {
+    totpError.value = true;
+    totpCode.value = "";
+    return;
+  }
+
+  const id = pendingDeleteId.value;
+
+  closeTotpDialog();
+
+  if (id) {
+    await axios.delete(`/api/order-items/${id}/`);
+    await applyFilters();
+  }
+}
+
 async function deleteItem(id) {
+  if (userInfo.value.is_staff && !userInfo.value.second) {
+    await openTotpDialog(id);
+    return;
+  }
+
   await axios.delete(`/api/order-items/${id}/`);
   await applyFilters();
 }
 
 function menuTitle(id) {
-  return menu.value.find((m) => m.id === id)?.title || `#${id}`;
+  const found = menu.value.find((m) => m.id === id);
+  if (found) return found.title;
+  return `#${id}`;
 }
 
 onBeforeMount(async () => {
+  await fetchUserInfo();
   await fetchOrders();
   await fetchMenu();
   await applyFilters();
@@ -222,7 +308,6 @@ onBeforeMount(async () => {
       </div>
     </div>
 
-
     <div class="modal fade" id="editOrderItemModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -267,5 +352,52 @@ onBeforeMount(async () => {
       </div>
     </div>
 
+    <div
+      v-if="totpDialogVisible"
+      class="modal fade show"
+      style="display: block;"
+      tabindex="-1"
+      aria-modal="true"
+      role="dialog"
+    >
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">2FA подтверждение</h5>
+            <button type="button" class="btn-close" @click="closeTotpDialog"></button>
+          </div>
+
+          <div class="modal-body d-flex flex-column" style="gap: 12px;">
+            <div class="text-muted" style="font-size: 14px;">
+              Отсканируйте QR-код и введите код.
+            </div>
+
+            <div class="d-flex justify-content-center" v-if="qrDataUrl">
+              <img :src="qrDataUrl" alt="QR" style="width: 220px; height: 220px;" />
+            </div>
+
+            <div v-if="!qrDataUrl" class="text-muted" style="font-size: 14px;">
+              Не удалось получить QR. Обновите страницу и попробуйте снова.
+            </div>
+
+            <input class="form-control" placeholder="код из приложения" v-model="totpCode" />
+
+            <div v-if="totpError" class="text-danger" style="font-size: 14px;">
+              Неверный код
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" @click="closeTotpDialog">Отмена</button>
+            <button class="btn btn-danger" type="button" @click="confirmTotpAndDelete">Удалить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="totpDialogVisible" class="modal-backdrop fade show"></div>
+
   </div>
 </template>
+
+<style></style>

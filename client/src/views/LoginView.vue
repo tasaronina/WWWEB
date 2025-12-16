@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { ref, onBeforeMount } from "vue";
 import axios from "axios";
 import { useRouter } from "vue-router";
 import { useUserStore } from "@/stores/user_store";
@@ -25,9 +25,17 @@ async function onLoginFormSubmit() {
   await userStore.fetchUserInfo();
 
   if (userInfo.value?.is_authenticated) {
-    router.push("/");
+    router.push("/menu");
   }
 }
+
+onBeforeMount(async () => {
+  await userStore.fetchUserInfo();
+
+  if (userInfo.value?.is_authenticated) {
+    router.push("/menu");
+  }
+});
 </script>
 
 <template>

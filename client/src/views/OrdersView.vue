@@ -1,9 +1,19 @@
 <script setup>
 import { onBeforeMount, ref, nextTick } from "vue";
 import axios from "axios";
+import { useUserStore } from "@/stores/user_store";
+import QRCode from "qrcode";
+
+const userStore = useUserStore();
 
 const items = ref([]);
 const stats = ref(null);
+
+const userInfo = ref({
+  is_authenticated: false,
+  is_staff: false,
+  second: false,
+});
 
 const customers = ref([]);
 const menu = ref([]);
@@ -32,8 +42,34 @@ const addPosForm = ref({
   qty: 1,
 });
 
-
 const openModalBtn = ref(null);
+
+const totpDialogVisible = ref(false);
+const totpUrl = ref("");
+const qrDataUrl = ref("");
+const totpCode = ref("");
+const totpError = ref(false);
+const pendingAction = ref({
+  type: "",
+  id: null,
+});
+
+async function buildQr(u) {
+  if (!u) {
+    qrDataUrl.value = "";
+    return;
+  }
+
+  qrDataUrl.value = await QRCode.toDataURL(u, {
+    width: 220,
+    margin: 1,
+  });
+}
+
+async function fetchUserInfo() {
+  const r = await axios.get("/api/user/info/");
+  userInfo.value = r.data || userInfo.value;
+}
 
 async function fetchCustomers() {
   const r = await axios.get("/api/customers/");
@@ -66,16 +102,22 @@ async function applyFilters() {
 }
 
 function customerName(id) {
-  return customers.value.find((c) => c.id === id)?.name || `#${id}`;
+  const found = customers.value.find((c) => c.id === id);
+  if (found) return found.name;
+  return `#${id}`;
 }
 
 function menuTitle(id) {
-  return menu.value.find((m) => m.id === id)?.title || `#${id}`;
+  const found = menu.value.find((m) => m.id === id);
+  if (found) return found.title;
+  return `#${id}`;
 }
 
 function menuPrice(id) {
-  const p = menu.value.find((m) => m.id === id)?.price;
-  return p == null ? "" : p;
+  const found = menu.value.find((m) => m.id === id);
+  if (!found) return "";
+  if (found.price == null) return "";
+  return found.price;
 }
 
 async function createOrder() {
@@ -88,7 +130,6 @@ async function createOrder() {
 
   createForm.value = { customer: null, status: "" };
   await applyFilters();
-
 
   await openEdit(r.data);
 }
@@ -105,9 +146,10 @@ async function openEdit(o) {
 
   await fetchOrderItems(o.id);
 
- 
   await nextTick();
-  if (openModalBtn.value) openModalBtn.value.click();
+  if (openModalBtn.value) {
+    openModalBtn.value.click();
+  }
 }
 
 async function saveOrder() {
@@ -121,12 +163,81 @@ async function saveOrder() {
 
   await applyFilters();
 
-  
   const updated = items.value.find((x) => x.id === id);
-  if (updated) editForm.value.total_price = updated.total_price || 0;
+  if (updated) {
+    editForm.value.total_price = updated.total_price || 0;
+  }
+}
+
+async function openTotpDialog(type, id) {
+  pendingAction.value = { type: type, id: id };
+  totpDialogVisible.value = true;
+
+  totpError.value = false;
+  totpCode.value = "";
+  totpUrl.value = "";
+  qrDataUrl.value = "";
+
+  const u = await userStore.getTotp();
+  totpUrl.value = u || "";
+  await buildQr(totpUrl.value);
+}
+
+function closeTotpDialog() {
+  totpDialogVisible.value = false;
+
+  totpError.value = false;
+  totpCode.value = "";
+  totpUrl.value = "";
+  qrDataUrl.value = "";
+
+  pendingAction.value = { type: "", id: null };
+}
+
+async function confirmTotpAndRun() {
+  totpError.value = false;
+
+  const ok = await userStore.verifyTotp(totpCode.value);
+  await fetchUserInfo();
+
+  if (!ok) {
+    totpError.value = true;
+    totpCode.value = "";
+    return;
+  }
+
+  const t = pendingAction.value.type;
+  const id = pendingAction.value.id;
+
+  closeTotpDialog();
+
+  if (t === "order" && id) {
+    await axios.delete(`/api/orders/${id}/`);
+    await applyFilters();
+    return;
+  }
+
+  if (t === "position" && id) {
+    await axios.delete(`/api/order-items/${id}/`);
+
+    await fetchOrderItems(editForm.value.id);
+    await applyFilters();
+
+    const updated = items.value.find((x) => x.id === editForm.value.id);
+    if (updated) {
+      editForm.value.total_price = updated.total_price || 0;
+    }
+
+    return;
+  }
 }
 
 async function deleteOrder(id) {
+  if (userInfo.value.is_staff && !userInfo.value.second) {
+    await openTotpDialog("order", id);
+    return;
+  }
+
   await axios.delete(`/api/orders/${id}/`);
   await applyFilters();
 }
@@ -147,20 +258,30 @@ async function addPosition() {
   await applyFilters();
 
   const updated = items.value.find((x) => x.id === editForm.value.id);
-  if (updated) editForm.value.total_price = updated.total_price || 0;
+  if (updated) {
+    editForm.value.total_price = updated.total_price || 0;
+  }
 }
 
 async function deletePosition(id) {
+  if (userInfo.value.is_staff && !userInfo.value.second) {
+    await openTotpDialog("position", id);
+    return;
+  }
+
   await axios.delete(`/api/order-items/${id}/`);
 
   await fetchOrderItems(editForm.value.id);
   await applyFilters();
 
   const updated = items.value.find((x) => x.id === editForm.value.id);
-  if (updated) editForm.value.total_price = updated.total_price || 0;
+  if (updated) {
+    editForm.value.total_price = updated.total_price || 0;
+  }
 }
 
 onBeforeMount(async () => {
+  await fetchUserInfo();
   await fetchCustomers();
   await fetchMenu();
   await applyFilters();
@@ -171,7 +292,6 @@ onBeforeMount(async () => {
   <div class="container mt-4">
     <h2 class="mb-3">Заказы</h2>
 
-    <!-- Статистика -->
     <div class="mb-3">
       <div class="text-muted" v-if="stats">
         Всего заказов: <b>{{ stats.total_orders }}</b>
@@ -268,7 +388,6 @@ onBeforeMount(async () => {
       </div>
     </div>
 
-  
     <button
       ref="openModalBtn"
       class="d-none"
@@ -289,7 +408,7 @@ onBeforeMount(async () => {
           </div>
 
           <div class="modal-body">
-          
+
             <div class="card mb-3">
               <div class="card-header">Шапка</div>
               <div class="card-body">
@@ -319,7 +438,6 @@ onBeforeMount(async () => {
               </div>
             </div>
 
-           
             <div class="card mb-3">
               <div class="card-header">Добавить позицию</div>
               <div class="card-body">
@@ -346,7 +464,6 @@ onBeforeMount(async () => {
               </div>
             </div>
 
-     
             <div class="card">
               <div class="card-header">Состав заказа</div>
               <div class="card-body table-responsive">
@@ -394,5 +511,52 @@ onBeforeMount(async () => {
       </div>
     </div>
 
+    <div
+      v-if="totpDialogVisible"
+      class="modal fade show"
+      style="display: block;"
+      tabindex="-1"
+      aria-modal="true"
+      role="dialog"
+    >
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">2FA подтверждение</h5>
+            <button type="button" class="btn-close" @click="closeTotpDialog"></button>
+          </div>
+
+          <div class="modal-body d-flex flex-column" style="gap: 12px;">
+            <div class="text-muted" style="font-size: 14px;">
+              Отсканируйте QR-код и введите код.
+            </div>
+
+            <div class="d-flex justify-content-center" v-if="qrDataUrl">
+              <img :src="qrDataUrl" alt="QR" style="width: 220px; height: 220px;" />
+            </div>
+
+            <div v-if="!qrDataUrl" class="text-muted" style="font-size: 14px;">
+              Не удалось получить QR. Обновите страницу и попробуйте снова.
+            </div>
+
+            <input class="form-control" placeholder="код из приложения" v-model="totpCode" />
+
+            <div v-if="totpError" class="text-danger" style="font-size: 14px;">
+              Неверный код
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" @click="closeTotpDialog">Отмена</button>
+            <button class="btn btn-danger" type="button" @click="confirmTotpAndRun">Подтвердить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="totpDialogVisible" class="modal-backdrop fade show"></div>
+
   </div>
 </template>
+
+<style></style>
