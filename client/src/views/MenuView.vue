@@ -38,6 +38,8 @@ const editForm = ref({
   description: "",
 });
 
+const editDialogVisible = ref(false);
+
 const totpDialogVisible = ref(false);
 const totpUrl = ref("");
 const qrDataUrl = ref("");
@@ -50,11 +52,7 @@ async function buildQr(u) {
     qrDataUrl.value = "";
     return;
   }
-
-  qrDataUrl.value = await QRCode.toDataURL(u, {
-    width: 220,
-    margin: 1,
-  });
+  qrDataUrl.value = await QRCode.toDataURL(u, { width: 220, margin: 1 });
 }
 
 async function fetchUserInfo() {
@@ -114,6 +112,7 @@ function openEdit(m) {
     price: m.price,
     description: m.description || "",
   };
+  editDialogVisible.value = true;
 }
 
 async function saveEdit() {
@@ -127,12 +126,14 @@ async function saveEdit() {
     description: editForm.value.description || "",
   });
 
+  editDialogVisible.value = false;
   await applyFilters();
 }
 
 async function openTotpDialog(deleteId) {
   pendingDeleteId.value = deleteId;
   totpDialogVisible.value = true;
+
   totpError.value = false;
   totpCode.value = "";
   totpUrl.value = "";
@@ -145,10 +146,12 @@ async function openTotpDialog(deleteId) {
 
 function closeTotpDialog() {
   totpDialogVisible.value = false;
+
   totpError.value = false;
   totpCode.value = "";
   totpUrl.value = "";
   qrDataUrl.value = "";
+
   pendingDeleteId.value = null;
 }
 
@@ -165,7 +168,6 @@ async function confirmTotpAndDelete() {
   }
 
   const id = pendingDeleteId.value;
-
   closeTotpDialog();
 
   if (id) {
@@ -208,96 +210,100 @@ onBeforeMount(async () => {
 </script>
 
 <template>
-  <div class="container mt-4">
-    <h2 class="mb-3">Меню</h2>
+  <div>
+    <div class="d-flex justify-space-between align-center mb-3">
+      <div class="text-h6">Меню</div>
 
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <div class="text-muted" v-if="stats">
-        Кол-во: <b>{{ stats.count }}</b>,
-        Средняя цена: <b>{{ stats.avg }}</b>,
-        Мин: <b>{{ stats.min }}</b>,
-        Макс: <b>{{ stats.max }}</b>
-      </div>
-
-      <div class="d-flex gap-2">
-        <button class="btn btn-outline-success btn-sm" @click="exportExcel">Excel</button>
-        <button class="btn btn-outline-primary btn-sm" @click="exportWord">Word</button>
+      <div class="d-flex align-center ga-2">
+        <v-btn variant="outlined" size="small" color="success" @click="exportExcel">Excel</v-btn>
+        <v-btn variant="outlined" size="small" color="primary" @click="exportWord">Word</v-btn>
       </div>
     </div>
 
-    <div class="card mb-3">
-      <div class="card-header">Добавить позицию меню</div>
-      <div class="card-body">
-        <form class="row g-2" @submit.prevent="createItem">
-          <div class="col-md-4">
-            <label class="form-label">Название</label>
-            <input class="form-control" v-model="createForm.title" />
-          </div>
-
-          <div class="col-md-3">
-            <label class="form-label">Категория</label>
-            <select class="form-select" v-model="createForm.group">
-              <option :value="null">—</option>
-              <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
-          </div>
-
-          <div class="col-md-2">
-            <label class="form-label">Цена</label>
-            <input class="form-control" v-model="createForm.price" />
-          </div>
-
-        
-
-          <div class="col-12 d-flex justify-content-end">
-            <button class="btn btn-primary">Добавить</button>
-          </div>
-        </form>
-      </div>
+    <div class="text-medium-emphasis mb-3" v-if="stats">
+      Кол-во: <b>{{ stats.count }}</b>,
+      Средняя цена: <b>{{ stats.avg }}</b>,
+      Мин: <b>{{ stats.min }}</b>,
+      Макс: <b>{{ stats.max }}</b>
     </div>
 
-    <div class="card mb-3">
-      <div class="card-header">Фильтры</div>
-      <div class="card-body">
-        <form class="row g-2" @submit.prevent="applyFilters">
-          <div class="col-md-4">
-            <label class="form-label">Название</label>
-            <input class="form-control" v-model="filters.title" />
-          </div>
+    <v-card variant="flat" border class="mb-4">
+      <v-card-title class="text-subtitle-1">Добавить позицию меню</v-card-title>
+      <v-card-text>
+        <v-form @submit.prevent="createItem">
+          <v-row>
+            <v-col cols="12" md="4">
+              <v-text-field v-model="createForm.title" label="Название" variant="outlined" />
+            </v-col>
 
-          <div class="col-md-2">
-            <label class="form-label">Категория (id)</label>
-            <input class="form-control" v-model="filters.group" />
-          </div>
+            <v-col cols="12" md="3">
+              <v-select
+                v-model="createForm.group"
+                :items="categories"
+                item-title="name"
+                item-value="id"
+                label="Категория"
+                variant="outlined"
+                :return-object="false"
+              />
+            </v-col>
 
-          <div class="col-md-2">
-            <label class="form-label">Цена от</label>
-            <input class="form-control" v-model="filters.price_min" />
-          </div>
+            <v-col cols="12" md="2">
+              <v-text-field v-model="createForm.price" label="Цена" variant="outlined" />
+            </v-col>
 
-          <div class="col-md-2">
-            <label class="form-label">Цена до</label>
-            <input class="form-control" v-model="filters.price_max" />
-          </div>
+            <v-col cols="12" md="3">
+              <v-text-field v-model="createForm.description" label="Описание" variant="outlined" />
+            </v-col>
 
-          <div class="col-md-2 d-flex align-items-end justify-content-end">
-            <button class="btn btn-primary">Применить</button>
-          </div>
-        </form>
-      </div>
-    </div>
+            <v-col cols="12" class="d-flex justify-end">
+              <v-btn type="submit" color="primary">Добавить</v-btn>
+            </v-col>
+          </v-row>
+        </v-form>
+      </v-card-text>
+    </v-card>
 
-    <div class="card">
-      <div class="card-header">Таблица</div>
-      <div class="card-body table-responsive">
-        <table class="table table-striped align-middle">
+    <v-card variant="flat" border class="mb-4">
+      <v-card-title class="text-subtitle-1">Фильтры</v-card-title>
+      <v-card-text>
+        <v-form @submit.prevent="applyFilters">
+          <v-row>
+            <v-col cols="12" md="4">
+              <v-text-field v-model="filters.title" label="Название" variant="outlined" />
+            </v-col>
+
+            <v-col cols="12" md="2">
+              <v-text-field v-model="filters.group" label="Категория (id)" variant="outlined" />
+            </v-col>
+
+            <v-col cols="12" md="2">
+              <v-text-field v-model="filters.price_min" label="Цена от" variant="outlined" />
+            </v-col>
+
+            <v-col cols="12" md="2">
+              <v-text-field v-model="filters.price_max" label="Цена до" variant="outlined" />
+            </v-col>
+
+            <v-col cols="12" md="2" class="d-flex align-end justify-end">
+              <v-btn type="submit" color="primary" block>Применить</v-btn>
+            </v-col>
+          </v-row>
+        </v-form>
+      </v-card-text>
+    </v-card>
+
+    <v-card variant="flat" border>
+      <v-card-title class="text-subtitle-1">Таблица</v-card-title>
+      <v-card-text>
+        <v-table>
           <thead>
             <tr>
               <th style="width: 90px;">ID</th>
               <th>Название</th>
               <th style="width: 220px;">Категория</th>
               <th style="width: 130px;">Цена</th>
-              <th style="width: 220px;">Действия</th>
+              <th style="width: 260px;">Действия</th>
             </tr>
           </thead>
 
@@ -307,113 +313,90 @@ onBeforeMount(async () => {
               <td>{{ m.title }}</td>
               <td>{{ categoryTitle(m.group) }}</td>
               <td>{{ m.price }}</td>
-              <td class="d-flex gap-2">
-                <button
-                  class="btn btn-sm btn-outline-secondary"
-                  data-bs-toggle="modal"
-                  data-bs-target="#editMenuModal"
-                  @click="openEdit(m)"
-                >
-                  Редактировать
-                </button>
-                <button class="btn btn-sm btn-outline-danger" @click="deleteItem(m.id)">
-                  Удалить
-                </button>
+              <td class="d-flex ga-2">
+                <v-btn size="small" variant="outlined" @click="openEdit(m)">Редактировать</v-btn>
+                <v-btn size="small" variant="outlined" color="error" @click="deleteItem(m.id)">Удалить</v-btn>
               </td>
             </tr>
 
             <tr v-if="items.length === 0">
-              <td colspan="6" class="text-muted text-center">Нет данных</td>
+              <td colspan="5" class="text-medium-emphasis text-center py-4">Нет данных</td>
             </tr>
           </tbody>
-        </table>
-      </div>
-    </div>
+        </v-table>
+      </v-card-text>
+    </v-card>
 
-    <div class="modal fade" id="editMenuModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">Редактировать позицию меню</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <!-- edit dialog -->
+    <v-dialog v-model="editDialogVisible" max-width="760">
+      <v-card>
+        <v-card-title>Редактировать позицию меню</v-card-title>
+        <v-card-text>
+          <v-form @submit.prevent.stop="saveEdit">
+            <v-row>
+              <v-col cols="12" md="5">
+                <v-text-field v-model="editForm.title" label="Название" variant="outlined" />
+              </v-col>
+
+              <v-col cols="12" md="3">
+                <v-select
+                  v-model="editForm.group"
+                  :items="categories"
+                  item-title="name"
+                  item-value="id"
+                  label="Категория"
+                  variant="outlined"
+                  :return-object="false"
+                />
+              </v-col>
+
+              <v-col cols="12" md="2">
+                <v-text-field v-model="editForm.price" label="Цена" variant="outlined" />
+              </v-col>
+
+              <v-col cols="12" md="2">
+                <v-text-field v-model="editForm.description" label="Описание" variant="outlined" />
+              </v-col>
+
+              <v-col cols="12" class="d-flex justify-end">
+                <v-btn color="primary" type="submit">Сохранить</v-btn>
+              </v-col>
+            </v-row>
+          </v-form>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
+    <!-- 2FA dialog -->
+    <v-dialog v-model="totpDialogVisible" max-width="560">
+      <v-card>
+        <v-card-title>2FA подтверждение</v-card-title>
+        <v-card-text>
+          <div class="text-medium-emphasis mb-3" style="font-size: 14px;">
+            Отсканируйте QR-код и введите код.
           </div>
 
-          <div class="modal-body">
-            <form class="row g-2" @submit.prevent.stop="saveEdit">
-              <div class="col-md-5">
-                <label class="form-label">Название</label>
-                <input class="form-control" v-model="editForm.title" />
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Категория</label>
-                <select class="form-select" v-model="editForm.group">
-                  <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
-                </select>
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Цена</label>
-                <input class="form-control" v-model="editForm.price" />
-              </div>
-
-            
-
-              <div class="col-12 text-end">
-                <button class="btn btn-primary" type="submit" data-bs-dismiss="modal">Сохранить</button>
-              </div>
-            </form>
+          <div class="d-flex justify-center mb-3" v-if="qrDataUrl">
+            <img :src="qrDataUrl" alt="QR" style="width: 220px; height: 220px;" />
           </div>
 
-        </div>
-      </div>
-    </div>
-
-    <div
-      v-if="totpDialogVisible"
-      class="modal fade show"
-      style="display: block;"
-      tabindex="-1"
-      aria-modal="true"
-      role="dialog"
-    >
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">2FA подтверждение</h5>
-            <button type="button" class="btn-close" @click="closeTotpDialog"></button>
+          <div v-else class="text-medium-emphasis mb-3" style="font-size: 14px;">
+            Не удалось получить QR. Обновите страницу и попробуйте снова.
           </div>
 
-          <div class="modal-body d-flex flex-column" style="gap: 12px;">
-            <div class="text-muted" style="font-size: 14px;">
-              Отсканируйте QR-код и введите код.
-            </div>
+          <v-text-field v-model="totpCode" label="Код из приложения" variant="outlined" />
 
-            <div class="d-flex justify-content-center" v-if="qrDataUrl">
-              <img :src="qrDataUrl" alt="QR" style="width: 220px; height: 220px;" />
-            </div>
-
-            <div v-if="!qrDataUrl" class="text-muted" style="font-size: 14px;">
-              Не удалось получить QR. Обновите страницу и попробуйте снова.
-            </div>
-
-            <input class="form-control" placeholder="код из приложения" v-model="totpCode" />
-
-            <div v-if="totpError" class="text-danger" style="font-size: 14px;">
-              Неверный код
-            </div>
+          <div v-if="totpError" class="text-error" style="font-size: 14px;">
+            Неверный код
           </div>
+        </v-card-text>
 
-          <div class="modal-footer">
-            <button class="btn btn-secondary" type="button" @click="closeTotpDialog">Отмена</button>
-            <button class="btn btn-danger" type="button" @click="confirmTotpAndDelete">Удалить</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="totpDialogVisible" class="modal-backdrop fade show"></div>
-
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="closeTotpDialog">Отмена</v-btn>
+          <v-btn color="error" @click="confirmTotpAndDelete">Удалить</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 

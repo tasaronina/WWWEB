@@ -39,22 +39,36 @@ onBeforeMount(async () => {
 </script>
 
 <template>
-  <div class="container">
-    <div class="d-flex justify-content-center align-items-center" style="min-height: calc(100vh - 80px);">
-      <div style="width: 100%; max-width: 520px;">
-        <h2 class="mb-3">Пожалуйста, авторизуйтесь</h2>
+  <div class="d-flex justify-center align-center" style="min-height: calc(100vh - 120px);">
+    <v-card style="width: 100%; max-width: 520px;" variant="flat" border>
+      <v-card-title class="text-h6">Пожалуйста, авторизуйтесь</v-card-title>
 
-        <form @submit.stop.prevent="onLoginFormSubmit" class="d-flex flex-column" style="gap: 12px;">
-          <input placeholder="логин" class="form-control" type="text" v-model="username" />
-          <input placeholder="пароль" class="form-control" type="password" v-model="password" />
-          <button class="btn btn-info">Войти</button>
+      <v-card-text>
+        <v-form @submit.prevent="onLoginFormSubmit">
+          <v-text-field
+            v-model="username"
+            label="Логин"
+            variant="outlined"
+            density="comfortable"
+          />
+          <v-text-field
+            v-model="password"
+            label="Пароль"
+            type="password"
+            variant="outlined"
+            density="comfortable"
+          />
 
-          <div class="text-muted" style="font-size: 14px;">
+          <v-btn type="submit" color="primary" block>
+            Войти
+          </v-btn>
+
+          <div class="text-medium-emphasis mt-3" style="font-size: 14px;">
             Админ увидит управление, пользователь — только меню и свои заказы.
           </div>
-        </form>
-      </div>
-    </div>
+        </v-form>
+      </v-card-text>
+    </v-card>
   </div>
 </template>
 

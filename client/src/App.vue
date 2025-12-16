@@ -22,64 +22,60 @@ async function handleLogout() {
 </script>
 
 <template>
-  <nav class="navbar navbar-expand-lg bg-body-tertiary">
-    <div class="container">
-      <router-link class="navbar-brand" to="/menu">Кофейня</router-link>
+  <v-app>
+    <v-app-bar flat>
+      <v-container class="d-flex align-center">
+        <v-toolbar-title class="me-6">
+          <RouterLink to="/menu" style="text-decoration: none; color: inherit;">
+            Кофейня
+          </RouterLink>
+        </v-toolbar-title>
 
-      <button
-        class="navbar-toggler"
-        type="button"
-        data-bs-toggle="collapse"
-        data-bs-target="#navbarNav"
-      >
-        <span class="navbar-toggler-icon"></span>
-      </button>
+        <div class="d-flex align-center ga-2 flex-wrap">
+          <v-btn variant="text" to="/menu">Меню</v-btn>
 
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav me-auto">
-      
-          <li class="nav-item">
-            <router-link class="nav-link" to="/menu">Меню</router-link>
-          </li>
+          <v-btn v-if="isAdmin" variant="text" to="/categories">Категории</v-btn>
+          <v-btn v-if="isAdmin" variant="text" to="/customers">Клиенты</v-btn>
+          <v-btn v-if="isAdmin" variant="text" to="/orders">Заказы</v-btn>
+          <v-btn v-if="isAdmin" variant="text" to="/order-items">Позиции заказов</v-btn>
+        </div>
 
-          <li v-if="isAdmin" class="nav-item">
-            <router-link class="nav-link" to="/categories">Категории</router-link>
-          </li>
-          <li v-if="isAdmin" class="nav-item">
-            <router-link class="nav-link" to="/customers">Клиенты</router-link>
-          </li>
-          <li v-if="isAdmin" class="nav-item">
-            <router-link class="nav-link" to="/orders">Заказы</router-link>
-          </li>
-          <li v-if="isAdmin" class="nav-item">
-            <router-link class="nav-link" to="/order-items">Позиции заказов</router-link>
-          </li>
+        <v-spacer />
 
-          
-        </ul>
+        <div class="d-flex align-center">
+          <v-menu v-if="isAuth" location="bottom end">
+            <template #activator="{ props }">
+              <v-btn v-bind="props" variant="text">
+                Пользователь ({{ userInfo.username }})
+              </v-btn>
+            </template>
 
-        <ul class="navbar-nav">
-          <li v-if="isAuth" class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-              Пользователь ({{ userInfo.username }})
-            </a>
-            <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="/admin">Админка</a></li>
-              <li><a class="dropdown-item" href="#" @click.prevent="handleLogout">Выйти</a></li>
-            </ul>
-          </li>
+            <v-list>
+              <v-list-item>
+                <v-list-item-title>
+                  <a href="/admin" style="text-decoration:none; color:inherit;">Админка</a>
+                </v-list-item-title>
+              </v-list-item>
 
-          <li v-else-if="showLoginButton" class="nav-item">
-            <router-link class="btn btn-outline-primary" to="/login">Войти</router-link>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </nav>
+              <v-list-item @click="handleLogout">
+                <v-list-item-title>Выйти</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
 
-  <div class="container">
-    <router-view />
-  </div>
+          <v-btn v-else-if="showLoginButton" variant="outlined" to="/login">
+            Войти
+          </v-btn>
+        </div>
+      </v-container>
+    </v-app-bar>
+
+    <v-main>
+      <v-container class="py-6">
+        <router-view />
+      </v-container>
+    </v-main>
+  </v-app>
 </template>
 
 <style scoped></style>
