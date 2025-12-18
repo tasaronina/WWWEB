@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeMount, ref } from "vue";
+import { onBeforeMount, ref, computed } from "vue";
 import axios from "axios";
 import { useUserStore } from "@/stores/user_store";
 import QRCode from "qrcode";
@@ -15,6 +15,8 @@ const userInfo = ref({
   is_staff: false,
   second: false,
 });
+
+const isAdmin = computed(() => !!userInfo.value.is_authenticated && !!userInfo.value.is_staff);
 
 const filters = ref({
   title: "",
@@ -70,8 +72,12 @@ function buildQuery() {
 }
 
 async function fetchCategories() {
-  const r = await axios.get("/api/categories/");
-  categories.value = r.data || [];
+  try {
+    const r = await axios.get("/api/categories/");
+    categories.value = r.data || [];
+  } catch (e) {
+    categories.value = [];
+  }
 }
 
 async function fetchItems() {
@@ -90,6 +96,8 @@ async function applyFilters() {
 }
 
 async function createItem() {
+  if (!isAdmin.value) return;
+
   if (!createForm.value.title) return;
   if (!createForm.value.group) return;
 
@@ -105,6 +113,8 @@ async function createItem() {
 }
 
 function openEdit(m) {
+  if (!isAdmin.value) return;
+
   editForm.value = {
     id: m.id,
     title: m.title,
@@ -116,6 +126,8 @@ function openEdit(m) {
 }
 
 async function saveEdit() {
+  if (!isAdmin.value) return;
+
   const id = editForm.value.id;
   if (!id) return;
 
@@ -131,6 +143,8 @@ async function saveEdit() {
 }
 
 async function openTotpDialog(deleteId) {
+  if (!isAdmin.value) return;
+
   pendingDeleteId.value = deleteId;
   totpDialogVisible.value = true;
 
@@ -156,6 +170,8 @@ function closeTotpDialog() {
 }
 
 async function confirmTotpAndDelete() {
+  if (!isAdmin.value) return;
+
   totpError.value = false;
 
   const ok = await userStore.verifyTotp(totpCode.value);
@@ -177,6 +193,8 @@ async function confirmTotpAndDelete() {
 }
 
 async function deleteItem(id) {
+  if (!isAdmin.value) return;
+
   if (userInfo.value.is_staff && !userInfo.value.second) {
     await openTotpDialog(id);
     return;
@@ -204,7 +222,11 @@ function categoryTitle(id) {
 
 onBeforeMount(async () => {
   await fetchUserInfo();
-  await fetchCategories();
+
+  if (isAdmin.value) {
+    await fetchCategories();
+  }
+
   await applyFilters();
 });
 </script>
@@ -227,7 +249,7 @@ onBeforeMount(async () => {
       Макс: <b>{{ stats.max }}</b>
     </div>
 
-    <v-card variant="flat" border class="mb-4">
+    <v-card v-if="isAdmin" variant="flat" border class="mb-4">
       <v-card-title class="text-subtitle-1">Добавить позицию меню</v-card-title>
       <v-card-text>
         <v-form @submit.prevent="createItem">
@@ -303,7 +325,7 @@ onBeforeMount(async () => {
               <th>Название</th>
               <th style="width: 220px;">Категория</th>
               <th style="width: 130px;">Цена</th>
-              <th style="width: 260px;">Действия</th>
+              <th v-if="isAdmin" style="width: 260px;">Действия</th>
             </tr>
           </thead>
 
@@ -313,21 +335,20 @@ onBeforeMount(async () => {
               <td>{{ m.title }}</td>
               <td>{{ categoryTitle(m.group) }}</td>
               <td>{{ m.price }}</td>
-              <td class="d-flex ga-2">
+              <td v-if="isAdmin" class="d-flex ga-2">
                 <v-btn size="small" variant="outlined" @click="openEdit(m)">Редактировать</v-btn>
                 <v-btn size="small" variant="outlined" color="error" @click="deleteItem(m.id)">Удалить</v-btn>
               </td>
             </tr>
 
             <tr v-if="items.length === 0">
-              <td colspan="5" class="text-medium-emphasis text-center py-4">Нет данных</td>
+              <td :colspan="isAdmin ? 5 : 4" class="text-medium-emphasis text-center py-4">Нет данных</td>
             </tr>
           </tbody>
         </v-table>
       </v-card-text>
     </v-card>
 
-    <!-- edit dialog -->
     <v-dialog v-model="editDialogVisible" max-width="760">
       <v-card>
         <v-card-title>Редактировать позицию меню</v-card-title>
@@ -367,7 +388,6 @@ onBeforeMount(async () => {
       </v-card>
     </v-dialog>
 
-    <!-- 2FA dialog -->
     <v-dialog v-model="totpDialogVisible" max-width="560">
       <v-card>
         <v-card-title>2FA подтверждение</v-card-title>

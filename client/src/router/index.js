@@ -19,7 +19,6 @@ const router = createRouter({
       component: LoginView,
     },
 
-    // главную страницу убрали — стартуем с меню
     {
       path: "/",
       redirect: "/menu",
@@ -30,33 +29,49 @@ const router = createRouter({
       name: "Menu",
       component: MenuView,
     },
+
     {
       path: "/categories",
       name: "Categories",
       component: CategoriesView,
+      meta: { requiresAdmin: true },
     },
     {
       path: "/customers",
       name: "Customers",
       component: CustomersView,
+      meta: { requiresAdmin: true },
     },
     {
       path: "/orders",
       name: "Orders",
       component: OrdersView,
+      meta: { requiresAdmin: true },
     },
     {
       path: "/order-items",
       name: "OrderItems",
       component: OrderItemsView,
+      meta: { requiresAdmin: true },
     },
   ],
 });
 
-router.beforeEach((to, from) => {
+router.beforeEach(async (to, from) => {
   const userStore = useUserStore();
+
+  if (userStore.is_authenticated === null) {
+    await userStore.fetchUserInfo();
+  }
+
   if (userStore.is_authenticated == false && to.name != "Login") {
     return { name: "Login" };
+  }
+
+  if (to.meta && to.meta.requiresAdmin) {
+    if (userStore.is_staff == false) {
+      return { name: "Menu" };
+    }
   }
 });
 

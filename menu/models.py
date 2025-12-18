@@ -69,7 +69,7 @@ class Order(models.Model):
         blank=True,
     )
 
-    # “клиент” как сущность кофейни (для админа/кассира)
+  
     customer = models.ForeignKey(
         Customer,
         on_delete=models.SET_NULL,
